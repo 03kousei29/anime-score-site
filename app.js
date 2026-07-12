@@ -4,9 +4,9 @@ import {
   GoogleAuthProvider,
   onAuthStateChanged,
   signInWithPopup,
-  signInWithRedirect,
-  getRedirectResult,
-  signOut
+  signOut,
+  setPersistence,
+  browserLocalPersistence
 } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
 import {
   getFirestore,
@@ -602,11 +602,6 @@ importInput.addEventListener("change", async event => {
   }
 });
 
-function isLikelyMobile() {
-  return window.matchMedia("(max-width: 760px)").matches ||
-    /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-}
-
 async function loginWithGoogle() {
   if (!auth) return;
 
@@ -617,30 +612,13 @@ async function loginWithGoogle() {
   provider.setCustomParameters({ prompt: "select_account" });
 
   try {
-    // モバイルではリダイレクト、PCではポップアップを優先します。
-    if (isLikelyMobile()) {
-      await signInWithRedirect(auth, provider);
-      return;
-    }
-
+    // PC・スマホともにポップアップ方式を使用します。
+    // GitHub Pages と Firebase のドメインが異なる環境では、
+    // モバイルのリダイレクト認証がブラウザのストレージ制限を受けるためです。
     await signInWithPopup(auth, provider);
   } catch (error) {
-    if ([
-      "auth/popup-blocked",
-      "auth/popup-closed-by-user",
-      "auth/cancelled-popup-request"
-    ].includes(error.code)) {
-      try {
-        await signInWithRedirect(auth, provider);
-        return;
-      } catch (redirectError) {
-        console.error(redirectError);
-        setLoginStatus(`ログインに失敗しました：${friendlyError(redirectError)}`, true);
-      }
-    } else {
-      console.error(error);
-      setLoginStatus(`ログインに失敗しました：${friendlyError(error)}`, true);
-    }
+    console.error(error);
+    setLoginStatus(`ログインに失敗しました：${friendlyError(error)}`, true);
   } finally {
     loginBtn.disabled = false;
   }
@@ -687,15 +665,11 @@ async function initializeFirebase() {
   try {
     const app = initializeApp(firebaseConfig);
     auth = getAuth(app);
-    db = getFirestore(app);
 
-    // リダイレクトログインから戻った際のエラーを明示します。
-    try {
-      await getRedirectResult(auth);
-    } catch (error) {
-      console.error(error);
-      setLoginStatus(`ログインに失敗しました：${friendlyError(error)}`, true);
-    }
+    // ログイン状態を同じブラウザ内に永続保存します。
+    await setPersistence(auth, browserLocalPersistence);
+
+    db = getFirestore(app);
 
     onAuthStateChanged(auth, user => {
       if (user) {
