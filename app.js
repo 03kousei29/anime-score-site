@@ -1,23 +1,23 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
-import {
-  getAuth,
-  GoogleAuthProvider,
-  onAuthStateChanged,
-  signInWithPopup,
-  signOut,
-  setPersistence,
-  browserLocalPersistence
-} from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
-import {
-  getFirestore,
-  collection,
-  doc,
-  setDoc,
-  deleteDoc,
-  onSnapshot,
-  writeBatch
-} from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
 import { firebaseConfig } from "./firebase-config.js";
+
+const IS_LOCAL = ["localhost", "127.0.0.1", "::1"].includes(location.hostname);
+const LOCAL_STORAGE_KEY = "anime-score-lab-v2-dev";
+
+let initializeApp;
+let getAuth;
+let GoogleAuthProvider;
+let onAuthStateChanged;
+let signInWithPopup;
+let signOut;
+let setPersistence;
+let browserLocalPersistence;
+let getFirestore;
+let collection;
+let doc;
+let setDoc;
+let deleteDoc;
+let onSnapshot;
+let writeBatch;
 
 const CATEGORIES = [
   "ストーリー",
@@ -74,6 +74,67 @@ const memoInput = document.getElementById("memo");
 const searchInput = document.getElementById("searchInput");
 const saveBtn = document.getElementById("saveBtn");
 const importInput = document.getElementById("importInput");
+const overallRanking = document.getElementById("overallRanking");
+const overallRankingEmpty = document.getElementById("overallRankingEmpty");
+const overallRankingCount = document.getElementById("overallRankingCount");
+const genreRanking = document.getElementById("genreRanking");
+const genreRankingEmpty = document.getElementById("genreRankingEmpty");
+const genreRankingCount = document.getElementById("genreRankingCount");
+const genreRankingSelect = document.getElementById("genreRankingSelect");
+
+function loadLocalWorks() {
+  try {
+    const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
+    const parsed = stored ? JSON.parse(stored) : [];
+    return Array.isArray(parsed)
+      ? parsed.map(item => normalizeWork(item)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      : [];
+  } catch (error) {
+    console.error(error);
+    return [];
+  }
+}
+
+function saveLocalWorks() {
+  localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(works));
+}
+
+function refreshLocalWorks(message = `ローカル保存済み：${works.length}作品`) {
+  works.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const existingIds = new Set(works.map(work => work.id));
+  selectedIds = new Set([...selectedIds].filter(id => existingIds.has(id)));
+  saveLocalWorks();
+  renderAll();
+  setSyncStatus(message, "local");
+}
+
+async function loadFirebaseModules() {
+  const [appModule, authModule, firestoreModule] = await Promise.all([
+    import("https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js"),
+    import("https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js"),
+    import("https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js")
+  ]);
+
+  ({ initializeApp } = appModule);
+  ({
+    getAuth,
+    GoogleAuthProvider,
+    onAuthStateChanged,
+    signInWithPopup,
+    signOut,
+    setPersistence,
+    browserLocalPersistence
+  } = authModule);
+  ({
+    getFirestore,
+    collection,
+    doc,
+    setDoc,
+    deleteDoc,
+    onSnapshot,
+    writeBatch
+  } = firestoreModule);
+}
 
 function isFirebaseConfigured() {
   const required = [
@@ -235,18 +296,29 @@ animeForm.addEventListener("submit", async event => {
   if (!work.title) return;
 
   setFormBusy(true);
-  setSyncStatus("Firestoreへ保存しています…");
+  setSyncStatus(IS_LOCAL ? "ローカルへ保存しています…" : "Firestoreへ保存しています…");
 
   try {
-    await setDoc(reviewDocument(work.id), {
-      title: work.title,
-      genre: work.genre,
-      memo: work.memo,
-      scores: work.scores,
-      updatedAt: work.updatedAt
-    });
-    resetForm();
-    setSyncStatus("保存しました。ほかの端末にも同期されます。", "success");
+    if (IS_LOCAL) {
+      const existingIndex = works.findIndex(item => item.id === work.id);
+      if (existingIndex >= 0) {
+        works[existingIndex] = work;
+      } else {
+        works.unshift(work);
+      }
+      resetForm();
+      refreshLocalWorks(`ローカル保存済み：${works.length}作品`);
+    } else {
+      await setDoc(reviewDocument(work.id), {
+        title: work.title,
+        genre: work.genre,
+        memo: work.memo,
+        scores: work.scores,
+        updatedAt: work.updatedAt
+      });
+      resetForm();
+      setSyncStatus("保存しました。ほかの端末にも同期されます。", "success");
+    }
   } catch (error) {
     console.error(error);
     setSyncStatus(`保存に失敗しました：${friendlyError(error)}`, "error");
@@ -263,6 +335,7 @@ document.getElementById("clearCompareBtn").addEventListener("click", () => {
 });
 
 searchInput.addEventListener("input", renderLibrary);
+genreRankingSelect.addEventListener("change", renderRankings);
 
 function average(scores) {
   return Math.round(scores.reduce((sum, value) => sum + value, 0) / scores.length);
@@ -337,11 +410,17 @@ function renderLibrary() {
     card.querySelector(".delete-btn").addEventListener("click", async () => {
       if (!confirm(`「${work.title}」を削除しますか？`)) return;
 
-      setSyncStatus("Firestoreから削除しています…");
+      setSyncStatus(IS_LOCAL ? "ローカルデータを削除しています…" : "Firestoreから削除しています…");
       try {
-        await deleteDoc(reviewDocument(work.id));
-        selectedIds.delete(work.id);
-        setSyncStatus("削除しました。", "success");
+        if (IS_LOCAL) {
+          works = works.filter(item => item.id !== work.id);
+          selectedIds.delete(work.id);
+          refreshLocalWorks(`ローカル保存済み：${works.length}作品`);
+        } else {
+          await deleteDoc(reviewDocument(work.id));
+          selectedIds.delete(work.id);
+          setSyncStatus("削除しました。", "success");
+        }
       } catch (error) {
         console.error(error);
         setSyncStatus(`削除に失敗しました：${friendlyError(error)}`, "error");
@@ -483,6 +562,93 @@ function renderChart() {
   `).join("");
 }
 
+function splitGenres(genreText) {
+  const genres = String(genreText || "")
+    .split(/[、,，/／|｜]+/)
+    .map(genre => genre.trim())
+    .filter(Boolean);
+
+  return genres.length ? [...new Set(genres)] : ["未設定"];
+}
+
+function compareByScoreThenTitle(a, b) {
+  const scoreDifference = average(b.scores) - average(a.scores);
+  if (scoreDifference !== 0) return scoreDifference;
+  return a.title.localeCompare(b.title, "ja");
+}
+
+function rankingItemHtml(work, index) {
+  const genres = splitGenres(work.genre).join("・");
+  return `
+    <li class="ranking-item">
+      <span class="ranking-position">${index + 1}</span>
+      <div class="ranking-work">
+        <strong title="${escapeHtml(work.title)}">${escapeHtml(work.title)}</strong>
+        <span title="${escapeHtml(genres)}">${escapeHtml(genres)}</span>
+      </div>
+      <div class="ranking-score">
+        <strong>${average(work.scores)}</strong>
+        <span>平均点</span>
+      </div>
+    </li>
+  `;
+}
+
+function availableGenres() {
+  return [...new Set(works.flatMap(work => splitGenres(work.genre)))]
+    .sort((a, b) => {
+      if (a === "未設定") return 1;
+      if (b === "未設定") return -1;
+      return a.localeCompare(b, "ja");
+    });
+}
+
+function updateGenreOptions(genres) {
+  const previousValue = genreRankingSelect.value;
+  genreRankingSelect.innerHTML = genres
+    .map(genre => `<option value="${escapeHtml(genre)}">${escapeHtml(genre)}</option>`)
+    .join("");
+
+  if (genres.includes(previousValue)) {
+    genreRankingSelect.value = previousValue;
+  } else if (genres.length) {
+    genreRankingSelect.value = genres[0];
+  }
+
+  genreRankingSelect.disabled = genres.length === 0;
+}
+
+function renderRankings() {
+  const sortedWorks = [...works].sort(compareByScoreThenTitle);
+  overallRankingCount.textContent = `${sortedWorks.length}作品`;
+  overallRanking.innerHTML = sortedWorks.slice(0, 10).map(rankingItemHtml).join("");
+  overallRankingEmpty.classList.toggle("hidden", sortedWorks.length > 0);
+  overallRanking.classList.toggle("hidden", sortedWorks.length === 0);
+
+  const genres = availableGenres();
+  const currentOptions = [...genreRankingSelect.options].map(option => option.value);
+  if (JSON.stringify(currentOptions) !== JSON.stringify(genres)) {
+    updateGenreOptions(genres);
+  }
+
+  const selectedGenre = genreRankingSelect.value;
+  const genreWorks = selectedGenre
+    ? works
+        .filter(work => splitGenres(work.genre).includes(selectedGenre))
+        .sort(compareByScoreThenTitle)
+    : [];
+
+  genreRankingCount.textContent = selectedGenre
+    ? `${selectedGenre}：${genreWorks.length}作品`
+    : "0作品";
+  genreRanking.innerHTML = genreWorks.slice(0, 10).map(rankingItemHtml).join("");
+  genreRankingEmpty.textContent = genres.length
+    ? "このジャンルの作品はまだありません。"
+    : "ジャンルを設定した作品を登録してください。";
+  genreRankingEmpty.classList.toggle("hidden", genreWorks.length > 0);
+  genreRanking.classList.toggle("hidden", genreWorks.length === 0);
+}
+
 function updateSummary() {
   document.getElementById("workCount").textContent = works.length;
   document.getElementById("compareCount").textContent = selectedIds.size;
@@ -499,6 +665,7 @@ function updateSummary() {
 function renderAll() {
   renderLibrary();
   renderChart();
+  renderRankings();
   updateSummary();
 }
 
@@ -571,28 +738,37 @@ importInput.addEventListener("change", async event => {
       .map(item => normalizeWork(item));
 
     if (!valid.length) throw new Error("読み込める作品データがありません。");
-    if (!confirm(`${valid.length}作品をFirestoreへ追加・上書きしますか？`)) return;
+    const destination = IS_LOCAL ? "ローカルデータ" : "Firestore";
+    if (!confirm(`${valid.length}作品を${destination}へ追加・上書きしますか？`)) return;
 
-    setSyncStatus(`${valid.length}作品をFirestoreへ読み込んでいます…`);
+    setSyncStatus(`${valid.length}作品を${destination}へ読み込んでいます…`);
 
-    // Firestoreのバッチ上限に余裕を持たせ、400件ずつ処理します。
-    for (let start = 0; start < valid.length; start += 400) {
-      const batch = writeBatch(db);
-      valid.slice(start, start + 400).forEach(work => {
-        batch.set(reviewDocument(work.id), {
-          title: work.title,
-          genre: work.genre,
-          memo: work.memo,
-          scores: work.scores,
-          updatedAt: work.updatedAt
+    if (IS_LOCAL) {
+      const merged = new Map(works.map(work => [work.id, work]));
+      valid.forEach(work => merged.set(work.id, work));
+      works = [...merged.values()];
+      selectedIds.clear();
+      refreshLocalWorks(`ローカル保存済み：${works.length}作品`);
+    } else {
+      // Firestoreのバッチ上限に余裕を持たせ、400件ずつ処理します。
+      for (let start = 0; start < valid.length; start += 400) {
+        const batch = writeBatch(db);
+        valid.slice(start, start + 400).forEach(work => {
+          batch.set(reviewDocument(work.id), {
+            title: work.title,
+            genre: work.genre,
+            memo: work.memo,
+            scores: work.scores,
+            updatedAt: work.updatedAt
+          });
         });
-      });
-      await batch.commit();
+        await batch.commit();
+      }
+      selectedIds.clear();
+      setSyncStatus(`${valid.length}作品を読み込みました。`, "success");
     }
 
-    selectedIds.clear();
-    setSyncStatus(`${valid.length}作品を読み込みました。`, "success");
-    alert(`${valid.length}作品をFirestoreへ読み込みました。`);
+    alert(`${valid.length}作品を${destination}へ読み込みました。`);
   } catch (error) {
     console.error(error);
     setSyncStatus(`読み込みに失敗しました：${friendlyError(error)}`, "error");
@@ -650,9 +826,26 @@ logoutBtn.addEventListener("click", async () => {
   }
 });
 
-async function initializeFirebase() {
+async function initializeApplication() {
   createScoreInputs();
   renderAll();
+
+  if (IS_LOCAL) {
+    currentUser = {
+      uid: "local-development-user",
+      displayName: "ローカル開発モード",
+      email: "データはこのブラウザ内に保存されます",
+      photoURL: ""
+    };
+    works = loadLocalWorks();
+    renderUser(currentUser);
+    logoutBtn.classList.add("hidden");
+    showAppScreen();
+    renderAll();
+    setSyncStatus(`ローカル開発モード：${works.length}作品をブラウザ内に保存中`, "local");
+    return;
+  }
+
   showLoginScreen();
 
   if (!isFirebaseConfigured()) {
@@ -663,12 +856,10 @@ async function initializeFirebase() {
   }
 
   try {
+    await loadFirebaseModules();
     const app = initializeApp(firebaseConfig);
     auth = getAuth(app);
-
-    // ログイン状態を同じブラウザ内に永続保存します。
     await setPersistence(auth, browserLocalPersistence);
-
     db = getFirestore(app);
 
     onAuthStateChanged(auth, user => {
@@ -702,4 +893,4 @@ async function initializeFirebase() {
   }
 }
 
-initializeFirebase();
+initializeApplication();

@@ -26,6 +26,7 @@
   </section>
 
   <div id="appScreen" class="hidden">
+    <div id="environmentBadge" class="environment-badge">ローカル開発モード</div>
     <header class="app-header">
       <div>
         <p class="eyebrow">CLOUD ANIME REVIEW TOOL</p>
@@ -123,6 +124,42 @@
             <span>平均点トップ</span>
             <strong id="topWork">―</strong>
           </article>
+        </div>
+      </section>
+
+      <section class="panel ranking-panel">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">RANKING</p>
+            <h2>ランキング</h2>
+          </div>
+          <p class="ranking-note">10項目の平均点順</p>
+        </div>
+
+        <div class="ranking-grid">
+          <section class="ranking-block" aria-labelledby="overallRankingTitle">
+            <div class="ranking-heading">
+              <h3 id="overallRankingTitle">総合ランキング</h3>
+              <span id="overallRankingCount">0作品</span>
+            </div>
+            <ol id="overallRanking" class="ranking-list"></ol>
+            <div id="overallRankingEmpty" class="ranking-empty">作品を登録するとランキングが表示されます。</div>
+          </section>
+
+          <section class="ranking-block" aria-labelledby="genreRankingTitle">
+            <div class="ranking-heading genre-heading">
+              <div>
+                <h3 id="genreRankingTitle">ジャンル別ランキング</h3>
+                <span id="genreRankingCount">0作品</span>
+              </div>
+              <label class="genre-filter">
+                <span class="sr-only">ジャンルを選択</span>
+                <select id="genreRankingSelect" aria-label="ランキングのジャンルを選択"></select>
+              </label>
+            </div>
+            <ol id="genreRanking" class="ranking-list"></ol>
+            <div id="genreRankingEmpty" class="ranking-empty">ジャンルを設定した作品を登録してください。</div>
+          </section>
         </div>
       </section>
 
