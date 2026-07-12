@@ -304,3 +304,131 @@ input[type="range"] {
   .section-title { align-items: flex-start; flex-direction: column; }
   .search-box { width: 100%; }
 }
+
+/* Firebase / Authentication */
+.login-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.login-card {
+  width: min(520px, 100%);
+  padding: 42px;
+  border-radius: 24px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+
+.login-card p:not(.eyebrow) {
+  color: var(--muted);
+  line-height: 1.8;
+}
+
+.google-login {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+  margin-top: 18px;
+  padding: 14px 18px;
+  color: var(--text);
+  background: white;
+  border: 1px solid var(--line);
+  font-weight: 800;
+}
+
+.google-mark {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: white;
+  background: #4285f4;
+  font-weight: 900;
+}
+
+.status-message {
+  min-height: 24px;
+  margin-top: 14px;
+  margin-bottom: 0;
+  font-size: 0.86rem;
+}
+
+.status-message.error { color: var(--danger) !important; }
+
+.config-help {
+  margin-top: 18px;
+  padding: 14px;
+  border: 1px solid #f0c7ca;
+  border-radius: 12px;
+  background: #fff5f6;
+  color: var(--danger);
+  text-align: left;
+  font-size: 0.85rem;
+}
+
+.config-help span { display: block; margin-top: 6px; color: #7b454a; }
+
+.account-area {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.user-profile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: right;
+}
+
+.user-profile strong,
+.user-profile span { display: block; }
+.user-profile span { margin-top: 2px; color: var(--muted); font-size: 0.77rem; }
+
+.user-photo {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid white;
+  box-shadow: 0 3px 12px rgba(20, 30, 70, 0.15);
+}
+
+.sync-banner {
+  max-width: 1376px;
+  margin: 0 auto 14px;
+  padding: 10px 16px;
+  border-radius: 12px;
+  background: #eef2ff;
+  color: var(--accent-dark);
+  font-size: 0.85rem;
+}
+
+.sync-banner.success { background: #edf9f4; color: #177253; }
+.sync-banner.error { background: #fff0f1; color: var(--danger); }
+
+button:disabled,
+.button.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+@media (max-width: 980px) {
+  .account-area { align-items: flex-start; width: 100%; }
+  .user-profile { text-align: left; }
+  .sync-banner { margin-left: 16px; margin-right: 16px; }
+}
+
+@media (max-width: 620px) {
+  .login-card { padding: 30px 22px; }
+  .header-actions { width: 100%; }
+  .header-actions > * { flex: 1 1 auto; text-align: center; }
+}

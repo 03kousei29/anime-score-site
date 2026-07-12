@@ -3,114 +3,146 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#4c66e5" />
   <title>Anime Score Lab</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <header class="app-header">
-    <div>
-      <p class="eyebrow">LOCAL ANIME REVIEW TOOL</p>
+  <section id="loginScreen" class="login-screen">
+    <div class="login-card">
+      <p class="eyebrow">CLOUD ANIME REVIEW TOOL</p>
       <h1>Anime Score Lab</h1>
-      <p class="subtitle">10項目を100点満点で評価し、作品ごとの強みを比較します。</p>
+      <p>10項目の評価をGoogleアカウントに保存し、PCとスマートフォンで同期します。</p>
+      <button id="loginBtn" class="google-login" type="button">
+        <span class="google-mark" aria-hidden="true">G</span>
+        Googleでログイン
+      </button>
+      <p id="loginStatus" class="status-message" aria-live="polite"></p>
+      <div id="configHelp" class="config-help hidden">
+        <strong>Firebaseの設定が必要です。</strong>
+        <span><code>firebase-config.js</code> の値をFirebase Consoleの設定値へ置き換えてください。</span>
+      </div>
     </div>
-    <div class="header-actions">
-      <button id="exportBtn" class="secondary">JSONを書き出す</button>
-      <label class="button secondary">
-        JSONを読み込む
-        <input id="importInput" type="file" accept=".json,application/json" hidden />
-      </label>
-    </div>
-  </header>
+  </section>
 
-  <main class="layout">
-    <section class="panel editor-panel">
-      <div class="section-title">
-        <div>
-          <p class="eyebrow">REVIEW</p>
-          <h2>作品を評価</h2>
-        </div>
-        <button id="resetBtn" class="text-button">入力をリセット</button>
+  <div id="appScreen" class="hidden">
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">CLOUD ANIME REVIEW TOOL</p>
+        <h1>Anime Score Lab</h1>
+        <p class="subtitle">10項目を100点満点で評価し、作品ごとの強みを比較します。</p>
       </div>
-
-      <form id="animeForm">
-        <input id="editingId" type="hidden" />
-
-        <div class="form-grid two">
-          <label>
-            <span>作品名</span>
-            <input id="title" type="text" placeholder="例：進撃の巨人" required maxlength="80" />
+      <div class="account-area">
+        <div id="userProfile" class="user-profile">
+          <img id="userPhoto" class="user-photo hidden" alt="" referrerpolicy="no-referrer" />
+          <div>
+            <strong id="userName">ログイン中</strong>
+            <span id="userEmail"></span>
+          </div>
+        </div>
+        <div class="header-actions">
+          <button id="exportBtn" class="secondary" type="button">JSONを書き出す</button>
+          <label class="button secondary">
+            JSONを読み込む
+            <input id="importInput" type="file" accept=".json,application/json" hidden />
           </label>
-          <label>
-            <span>ジャンル・補足</span>
-            <input id="genre" type="text" placeholder="例：ダークファンタジー" maxlength="80" />
+          <button id="logoutBtn" class="secondary" type="button">ログアウト</button>
+        </div>
+      </div>
+    </header>
+
+    <div id="syncBanner" class="sync-banner" aria-live="polite">Firestoreと同期しています…</div>
+
+    <main class="layout">
+      <section class="panel editor-panel">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">REVIEW</p>
+            <h2>作品を評価</h2>
+          </div>
+          <button id="resetBtn" class="text-button" type="button">入力をリセット</button>
+        </div>
+
+        <form id="animeForm">
+          <input id="editingId" type="hidden" />
+
+          <div class="form-grid two">
+            <label>
+              <span>作品名</span>
+              <input id="title" type="text" placeholder="例：進撃の巨人" required maxlength="80" />
+            </label>
+            <label>
+              <span>ジャンル・補足</span>
+              <input id="genre" type="text" placeholder="例：ダークファンタジー" maxlength="80" />
+            </label>
+          </div>
+
+          <div id="scoreInputs" class="score-list"></div>
+
+          <label class="memo-field">
+            <span>メモ</span>
+            <textarea id="memo" rows="4" placeholder="良かった点、気になった点など"></textarea>
+          </label>
+
+          <div class="form-actions">
+            <button id="saveBtn" type="submit" class="primary">作品を保存</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel chart-panel">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">COMPARE</p>
+            <h2>レーダーチャート</h2>
+          </div>
+          <div class="chart-actions">
+            <button id="clearCompareBtn" class="text-button" type="button">比較を解除</button>
+          </div>
+        </div>
+
+        <div id="chartEmpty" class="empty-state">
+          保存した作品から、比較したい作品を選択してください。
+        </div>
+
+        <div id="chartWrap" class="chart-wrap hidden">
+          <svg id="radarChart" viewBox="0 0 760 620" role="img" aria-label="アニメ評価のレーダーチャート"></svg>
+          <div id="legend" class="legend"></div>
+        </div>
+
+        <div class="summary-grid">
+          <article class="summary-card">
+            <span>登録作品数</span>
+            <strong id="workCount">0</strong>
+          </article>
+          <article class="summary-card">
+            <span>比較中</span>
+            <strong id="compareCount">0</strong>
+          </article>
+          <article class="summary-card">
+            <span>平均点トップ</span>
+            <strong id="topWork">―</strong>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel library-panel">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">LIBRARY</p>
+            <h2>作品一覧</h2>
+          </div>
+          <label class="search-box">
+            <span class="sr-only">作品を検索</span>
+            <input id="searchInput" type="search" placeholder="作品名で検索" />
           </label>
         </div>
 
-        <div id="scoreInputs" class="score-list"></div>
-
-        <label class="memo-field">
-          <span>メモ</span>
-          <textarea id="memo" rows="4" placeholder="良かった点、気になった点など"></textarea>
-        </label>
-
-        <div class="form-actions">
-          <button id="saveBtn" type="submit" class="primary">作品を保存</button>
-        </div>
-      </form>
-    </section>
-
-    <section class="panel chart-panel">
-      <div class="section-title">
-        <div>
-          <p class="eyebrow">COMPARE</p>
-          <h2>レーダーチャート</h2>
-        </div>
-        <div class="chart-actions">
-          <button id="clearCompareBtn" class="text-button">比較を解除</button>
-        </div>
-      </div>
-
-      <div id="chartEmpty" class="empty-state">
-        保存した作品から、比較したい作品を選択してください。
-      </div>
-
-      <div id="chartWrap" class="chart-wrap hidden">
-        <svg id="radarChart" viewBox="0 0 760 620" role="img" aria-label="アニメ評価のレーダーチャート"></svg>
-        <div id="legend" class="legend"></div>
-      </div>
-
-      <div class="summary-grid">
-        <article class="summary-card">
-          <span>登録作品数</span>
-          <strong id="workCount">0</strong>
-        </article>
-        <article class="summary-card">
-          <span>比較中</span>
-          <strong id="compareCount">0</strong>
-        </article>
-        <article class="summary-card">
-          <span>平均点トップ</span>
-          <strong id="topWork">―</strong>
-        </article>
-      </div>
-    </section>
-
-    <section class="panel library-panel">
-      <div class="section-title">
-        <div>
-          <p class="eyebrow">LIBRARY</p>
-          <h2>作品一覧</h2>
-        </div>
-        <label class="search-box">
-          <span class="sr-only">作品を検索</span>
-          <input id="searchInput" type="search" placeholder="作品名で検索" />
-        </label>
-      </div>
-
-      <div id="animeList" class="anime-list"></div>
-      <div id="libraryEmpty" class="empty-state">まだ作品が登録されていません。</div>
-    </section>
-  </main>
+        <div id="animeList" class="anime-list"></div>
+        <div id="libraryEmpty" class="empty-state">まだ作品が登録されていません。</div>
+      </section>
+    </main>
+  </div>
 
   <template id="animeCardTemplate">
     <article class="anime-card">
@@ -130,14 +162,14 @@
         </div>
       </div>
       <div class="anime-card-actions">
-        <button class="detail-btn">詳細</button>
-        <button class="edit-btn">編集</button>
-        <button class="delete-btn danger">削除</button>
+        <button class="detail-btn" type="button">詳細</button>
+        <button class="edit-btn" type="button">編集</button>
+        <button class="delete-btn danger" type="button">削除</button>
       </div>
       <div class="score-details hidden"></div>
     </article>
   </template>
 
-  <script src="app.js"></script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>

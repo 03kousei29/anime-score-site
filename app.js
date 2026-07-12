@@ -1,3 +1,24 @@
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
+import {
+  getAuth,
+  GoogleAuthProvider,
+  onAuthStateChanged,
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
+  signOut
+} from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
+import {
+  getFirestore,
+  collection,
+  doc,
+  setDoc,
+  deleteDoc,
+  onSnapshot,
+  writeBatch
+} from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
+import { firebaseConfig } from "./firebase-config.js";
+
 const CATEGORIES = [
   "ストーリー",
   "キャラクター",
@@ -20,9 +41,23 @@ const COLORS = [
   "#2d9bd3"
 ];
 
-const STORAGE_KEY = "anime-score-lab-v1";
-let works = loadWorks();
+let works = [];
 let selectedIds = new Set();
+let currentUser = null;
+let unsubscribeReviews = null;
+let auth = null;
+let db = null;
+
+const loginScreen = document.getElementById("loginScreen");
+const appScreen = document.getElementById("appScreen");
+const loginBtn = document.getElementById("loginBtn");
+const logoutBtn = document.getElementById("logoutBtn");
+const loginStatus = document.getElementById("loginStatus");
+const configHelp = document.getElementById("configHelp");
+const syncBanner = document.getElementById("syncBanner");
+const userName = document.getElementById("userName");
+const userEmail = document.getElementById("userEmail");
+const userPhoto = document.getElementById("userPhoto");
 
 const animeForm = document.getElementById("animeForm");
 const scoreInputs = document.getElementById("scoreInputs");
@@ -37,22 +72,73 @@ const titleInput = document.getElementById("title");
 const genreInput = document.getElementById("genre");
 const memoInput = document.getElementById("memo");
 const searchInput = document.getElementById("searchInput");
+const saveBtn = document.getElementById("saveBtn");
+const importInput = document.getElementById("importInput");
 
-function loadWorks() {
-  try {
-    const value = localStorage.getItem(STORAGE_KEY);
-    return value ? JSON.parse(value) : [];
-  } catch {
-    return [];
-  }
+function isFirebaseConfigured() {
+  const required = [
+    firebaseConfig.apiKey,
+    firebaseConfig.authDomain,
+    firebaseConfig.projectId,
+    firebaseConfig.appId
+  ];
+
+  return required.every(value =>
+    typeof value === "string" &&
+    value.trim() !== "" &&
+    !value.includes("YOUR_")
+  );
 }
 
-function saveWorks() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(works));
+function setLoginStatus(message = "", isError = false) {
+  loginStatus.textContent = message;
+  loginStatus.classList.toggle("error", isError);
+}
+
+function setSyncStatus(message, type = "") {
+  syncBanner.textContent = message;
+  syncBanner.className = "sync-banner";
+  if (type) syncBanner.classList.add(type);
+}
+
+function showLoginScreen() {
+  loginScreen.classList.remove("hidden");
+  appScreen.classList.add("hidden");
+}
+
+function showAppScreen() {
+  loginScreen.classList.add("hidden");
+  appScreen.classList.remove("hidden");
+}
+
+function reviewsCollection(uid = currentUser?.uid) {
+  if (!db || !uid) throw new Error("ログイン情報を確認できません。");
+  return collection(db, "users", uid, "animeReviews");
+}
+
+function reviewDocument(reviewId, uid = currentUser?.uid) {
+  if (!db || !uid) throw new Error("ログイン情報を確認できません。");
+  return doc(db, "users", uid, "animeReviews", reviewId);
+}
+
+function normalizeWork(item, fallbackId = crypto.randomUUID()) {
+  return {
+    id: String(item.id || fallbackId),
+    title: String(item.title || "").trim(),
+    genre: String(item.genre || "").trim(),
+    memo: String(item.memo || "").trim(),
+    scores: CATEGORIES.map((_, index) =>
+      Math.max(0, Math.min(100, Number(item.scores?.[index] ?? 0)))
+    ),
+    updatedAt: typeof item.updatedAt === "string"
+      ? item.updatedAt
+      : new Date().toISOString()
+  };
 }
 
 function createScoreInputs() {
   scoreInputs.innerHTML = "";
+
   CATEGORIES.forEach((category, index) => {
     const row = document.createElement("div");
     row.className = "score-row";
@@ -80,9 +166,12 @@ function createScoreInputs() {
     const range = row.querySelector(`#range-${index}`);
     const number = row.querySelector(`#number-${index}`);
 
-    range.addEventListener("input", () => number.value = range.value);
+    range.addEventListener("input", () => {
+      number.value = range.value;
+    });
+
     number.addEventListener("input", () => {
-      let value = Math.max(0, Math.min(100, Number(number.value || 0)));
+      const value = Math.max(0, Math.min(100, Number(number.value || 0)));
       number.value = value;
       range.value = value;
     });
@@ -93,7 +182,13 @@ function createScoreInputs() {
 
 function getScores() {
   return CATEGORIES.map((_, index) =>
-    Math.max(0, Math.min(100, Number(document.getElementById(`number-${index}`).value || 0)))
+    Math.max(
+      0,
+      Math.min(
+        100,
+        Number(document.getElementById(`number-${index}`).value || 0)
+      )
+    )
   );
 }
 
@@ -112,33 +207,53 @@ function resetForm() {
   genreInput.value = "";
   memoInput.value = "";
   setScores(CATEGORIES.map(() => 70));
-  document.getElementById("saveBtn").textContent = "作品を保存";
+  saveBtn.textContent = "作品を保存";
 }
 
-animeForm.addEventListener("submit", (event) => {
-  event.preventDefault();
+function setFormBusy(isBusy) {
+  saveBtn.disabled = isBusy;
+  saveBtn.textContent = isBusy
+    ? "保存中…"
+    : editingId.value
+      ? "変更を保存"
+      : "作品を保存";
+}
 
-  const work = {
+animeForm.addEventListener("submit", async event => {
+  event.preventDefault();
+  if (!currentUser) return;
+
+  const work = normalizeWork({
     id: editingId.value || crypto.randomUUID(),
-    title: titleInput.value.trim(),
-    genre: genreInput.value.trim(),
-    memo: memoInput.value.trim(),
+    title: titleInput.value,
+    genre: genreInput.value,
+    memo: memoInput.value,
     scores: getScores(),
     updatedAt: new Date().toISOString()
-  };
+  });
 
   if (!work.title) return;
 
-  const existingIndex = works.findIndex(item => item.id === work.id);
-  if (existingIndex >= 0) {
-    works[existingIndex] = work;
-  } else {
-    works.unshift(work);
-  }
+  setFormBusy(true);
+  setSyncStatus("Firestoreへ保存しています…");
 
-  saveWorks();
-  resetForm();
-  renderAll();
+  try {
+    await setDoc(reviewDocument(work.id), {
+      title: work.title,
+      genre: work.genre,
+      memo: work.memo,
+      scores: work.scores,
+      updatedAt: work.updatedAt
+    });
+    resetForm();
+    setSyncStatus("保存しました。ほかの端末にも同期されます。", "success");
+  } catch (error) {
+    console.error(error);
+    setSyncStatus(`保存に失敗しました：${friendlyError(error)}`, "error");
+    alert(`保存に失敗しました：${friendlyError(error)}`);
+  } finally {
+    setFormBusy(false);
+  }
 });
 
 document.getElementById("resetBtn").addEventListener("click", resetForm);
@@ -162,9 +277,9 @@ function strongestCategories(work) {
 }
 
 function renderLibrary() {
-  const query = searchInput.value.trim().toLowerCase();
+  const queryText = searchInput.value.trim().toLowerCase();
   const filtered = works.filter(work =>
-    `${work.title} ${work.genre}`.toLowerCase().includes(query)
+    `${work.title} ${work.genre}`.toLowerCase().includes(queryText)
   );
 
   animeList.innerHTML = "";
@@ -200,9 +315,11 @@ function renderLibrary() {
     const details = card.querySelector(".score-details");
     details.innerHTML = CATEGORIES.map((category, index) =>
       `<div class="detail-line"><span>${category}</span><strong>${work.scores[index]}</strong></div>`
-    ).join("") + (work.memo ? `<div class="detail-line" style="grid-column:1/-1"><span>メモ</span><strong>${escapeHtml(work.memo)}</strong></div>` : "");
+    ).join("") + (work.memo
+      ? `<div class="detail-line" style="grid-column:1/-1"><span>メモ</span><strong>${escapeHtml(work.memo)}</strong></div>`
+      : "");
 
-    card.querySelector(".detail-btn").addEventListener("click", (event) => {
+    card.querySelector(".detail-btn").addEventListener("click", event => {
       details.classList.toggle("hidden");
       event.currentTarget.textContent = details.classList.contains("hidden") ? "詳細" : "閉じる";
     });
@@ -213,16 +330,23 @@ function renderLibrary() {
       genreInput.value = work.genre;
       memoInput.value = work.memo;
       setScores(work.scores);
-      document.getElementById("saveBtn").textContent = "変更を保存";
+      saveBtn.textContent = "変更を保存";
       window.scrollTo({ top: 0, behavior: "smooth" });
     });
 
-    card.querySelector(".delete-btn").addEventListener("click", () => {
+    card.querySelector(".delete-btn").addEventListener("click", async () => {
       if (!confirm(`「${work.title}」を削除しますか？`)) return;
-      works = works.filter(item => item.id !== work.id);
-      selectedIds.delete(work.id);
-      saveWorks();
-      renderAll();
+
+      setSyncStatus("Firestoreから削除しています…");
+      try {
+        await deleteDoc(reviewDocument(work.id));
+        selectedIds.delete(work.id);
+        setSyncStatus("削除しました。", "success");
+      } catch (error) {
+        console.error(error);
+        setSyncStatus(`削除に失敗しました：${friendlyError(error)}`, "error");
+        alert(`削除に失敗しました：${friendlyError(error)}`);
+      }
     });
 
     animeList.appendChild(card);
@@ -230,13 +354,13 @@ function renderLibrary() {
 }
 
 function escapeHtml(value) {
-  return value.replace(/[&<>"']/g, char => ({
+  return String(value).replace(/[&<>"']/g, char => ({
     "&": "&amp;",
     "<": "&lt;",
     ">": "&gt;",
     '"': "&quot;",
     "'": "&#039;"
-  }[char]));
+  })[char]);
 }
 
 function renderChart() {
@@ -270,18 +394,18 @@ function renderChart() {
   radarChart.innerHTML = "";
 
   const append = (tag, attrs, text) => {
-    const el = document.createElementNS(ns, tag);
-    Object.entries(attrs || {}).forEach(([key, value]) => el.setAttribute(key, value));
-    if (text != null) el.textContent = text;
-    radarChart.appendChild(el);
-    return el;
+    const element = document.createElementNS(ns, tag);
+    Object.entries(attrs || {}).forEach(([key, value]) => element.setAttribute(key, value));
+    if (text != null) element.textContent = text;
+    radarChart.appendChild(element);
+    return element;
   };
 
   append("rect", { x: 0, y: 0, width: 760, height: 620, fill: "transparent" });
 
-  for (let level = 1; level <= levels; level++) {
-    const r = radius * (level / levels);
-    const points = CATEGORIES.map((_, index) => point(index, r).join(",")).join(" ");
+  for (let level = 1; level <= levels; level += 1) {
+    const levelRadius = radius * (level / levels);
+    const points = CATEGORIES.map((_, index) => point(index, levelRadius).join(",")).join(" ");
     append("polygon", {
       points,
       fill: "none",
@@ -293,15 +417,19 @@ function renderChart() {
   CATEGORIES.forEach((category, index) => {
     const [x, y] = point(index, radius);
     append("line", {
-      x1: cx, y1: cy, x2: x, y2: y,
-      stroke: "#e0e4ec", "stroke-width": 1
+      x1: cx,
+      y1: cy,
+      x2: x,
+      y2: y,
+      stroke: "#e0e4ec",
+      "stroke-width": 1
     });
 
-    const [lx, ly] = point(index, labelRadius);
-    const anchor = lx < cx - 12 ? "end" : lx > cx + 12 ? "start" : "middle";
+    const [labelX, labelY] = point(index, labelRadius);
+    const anchor = labelX < cx - 12 ? "end" : labelX > cx + 12 ? "start" : "middle";
     append("text", {
-      x: lx,
-      y: ly,
+      x: labelX,
+      y: labelY,
       "text-anchor": anchor,
       "dominant-baseline": "middle",
       fill: "#4f5967",
@@ -337,7 +465,9 @@ function renderChart() {
     work.scores.forEach((score, index) => {
       const [x, y] = point(index, radius * (score / 100));
       append("circle", {
-        cx: x, cy: y, r: 4.5,
+        cx: x,
+        cy: y,
+        r: 4.5,
         fill: "#ffffff",
         stroke: color,
         "stroke-width": 3
@@ -372,51 +502,230 @@ function renderAll() {
   updateSummary();
 }
 
+function subscribeReviews(uid) {
+  if (unsubscribeReviews) unsubscribeReviews();
+
+  setSyncStatus("Firestoreからデータを読み込んでいます…");
+  unsubscribeReviews = onSnapshot(
+    reviewsCollection(uid),
+    snapshot => {
+      works = snapshot.docs
+        .map(documentSnapshot => normalizeWork({
+          id: documentSnapshot.id,
+          ...documentSnapshot.data()
+        }, documentSnapshot.id))
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+
+      const existingIds = new Set(works.map(work => work.id));
+      selectedIds = new Set([...selectedIds].filter(id => existingIds.has(id)));
+      renderAll();
+      setSyncStatus(`同期済み：${works.length}作品`, "success");
+    },
+    error => {
+      console.error(error);
+      setSyncStatus(`同期に失敗しました：${friendlyError(error)}`, "error");
+    }
+  );
+}
+
+function renderUser(user) {
+  userName.textContent = user.displayName || "Googleユーザー";
+  userEmail.textContent = user.email || "";
+
+  if (user.photoURL) {
+    userPhoto.src = user.photoURL;
+    userPhoto.alt = `${user.displayName || "ユーザー"}のプロフィール画像`;
+    userPhoto.classList.remove("hidden");
+  } else {
+    userPhoto.removeAttribute("src");
+    userPhoto.classList.add("hidden");
+  }
+}
+
 document.getElementById("exportBtn").addEventListener("click", () => {
   const blob = new Blob([JSON.stringify(works, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `anime-score-data-${new Date().toISOString().slice(0, 10)}.json`;
-  a.click();
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `anime-score-data-${new Date().toISOString().slice(0, 10)}.json`;
+  anchor.click();
   URL.revokeObjectURL(url);
 });
 
-document.getElementById("importInput").addEventListener("change", async (event) => {
+importInput.addEventListener("change", async event => {
   const file = event.target.files?.[0];
-  if (!file) return;
+  if (!file || !currentUser) return;
 
   try {
     const imported = JSON.parse(await file.text());
-    if (!Array.isArray(imported)) throw new Error("形式が正しくありません。");
+    if (!Array.isArray(imported)) throw new Error("JSONの形式が正しくありません。");
 
-    const valid = imported.filter(item =>
-      item &&
-      typeof item.title === "string" &&
-      Array.isArray(item.scores) &&
-      item.scores.length === CATEGORIES.length
-    ).map(item => ({
-      id: item.id || crypto.randomUUID(),
-      title: item.title,
-      genre: item.genre || "",
-      memo: item.memo || "",
-      scores: item.scores.map(value => Math.max(0, Math.min(100, Number(value || 0)))),
-      updatedAt: item.updatedAt || new Date().toISOString()
-    }));
+    const valid = imported
+      .filter(item =>
+        item &&
+        typeof item.title === "string" &&
+        item.title.trim() &&
+        Array.isArray(item.scores) &&
+        item.scores.length === CATEGORIES.length
+      )
+      .map(item => normalizeWork(item));
 
     if (!valid.length) throw new Error("読み込める作品データがありません。");
+    if (!confirm(`${valid.length}作品をFirestoreへ追加・上書きしますか？`)) return;
 
-    works = valid;
+    setSyncStatus(`${valid.length}作品をFirestoreへ読み込んでいます…`);
+
+    // Firestoreのバッチ上限に余裕を持たせ、400件ずつ処理します。
+    for (let start = 0; start < valid.length; start += 400) {
+      const batch = writeBatch(db);
+      valid.slice(start, start + 400).forEach(work => {
+        batch.set(reviewDocument(work.id), {
+          title: work.title,
+          genre: work.genre,
+          memo: work.memo,
+          scores: work.scores,
+          updatedAt: work.updatedAt
+        });
+      });
+      await batch.commit();
+    }
+
     selectedIds.clear();
-    saveWorks();
-    renderAll();
-    alert(`${valid.length}作品を読み込みました。`);
+    setSyncStatus(`${valid.length}作品を読み込みました。`, "success");
+    alert(`${valid.length}作品をFirestoreへ読み込みました。`);
   } catch (error) {
-    alert(`読み込みに失敗しました：${error.message}`);
+    console.error(error);
+    setSyncStatus(`読み込みに失敗しました：${friendlyError(error)}`, "error");
+    alert(`読み込みに失敗しました：${friendlyError(error)}`);
   } finally {
     event.target.value = "";
   }
 });
 
-createScoreInputs();
-renderAll();
+function isLikelyMobile() {
+  return window.matchMedia("(max-width: 760px)").matches ||
+    /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
+async function loginWithGoogle() {
+  if (!auth) return;
+
+  loginBtn.disabled = true;
+  setLoginStatus("Googleログインを開始しています…");
+
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: "select_account" });
+
+  try {
+    // モバイルではリダイレクト、PCではポップアップを優先します。
+    if (isLikelyMobile()) {
+      await signInWithRedirect(auth, provider);
+      return;
+    }
+
+    await signInWithPopup(auth, provider);
+  } catch (error) {
+    if ([
+      "auth/popup-blocked",
+      "auth/popup-closed-by-user",
+      "auth/cancelled-popup-request"
+    ].includes(error.code)) {
+      try {
+        await signInWithRedirect(auth, provider);
+        return;
+      } catch (redirectError) {
+        console.error(redirectError);
+        setLoginStatus(`ログインに失敗しました：${friendlyError(redirectError)}`, true);
+      }
+    } else {
+      console.error(error);
+      setLoginStatus(`ログインに失敗しました：${friendlyError(error)}`, true);
+    }
+  } finally {
+    loginBtn.disabled = false;
+  }
+}
+
+function friendlyError(error) {
+  const messages = {
+    "auth/unauthorized-domain": "このGitHub PagesドメインがFirebase Authenticationで許可されていません。",
+    "auth/popup-blocked": "ログイン画面のポップアップがブロックされました。",
+    "auth/popup-closed-by-user": "ログイン画面が閉じられました。",
+    "auth/network-request-failed": "ネットワーク接続を確認してください。",
+    "permission-denied": "Firestoreのセキュリティルールにより拒否されました。",
+    "failed-precondition": "Firestoreの設定が完了していない可能性があります。",
+    "unavailable": "Firebaseへ接続できません。時間を置いて再度お試しください。"
+  };
+
+  return messages[error?.code] || error?.message || "不明なエラーです。";
+}
+
+loginBtn.addEventListener("click", loginWithGoogle);
+
+logoutBtn.addEventListener("click", async () => {
+  if (!auth) return;
+  try {
+    await signOut(auth);
+  } catch (error) {
+    console.error(error);
+    alert(`ログアウトに失敗しました：${friendlyError(error)}`);
+  }
+});
+
+async function initializeFirebase() {
+  createScoreInputs();
+  renderAll();
+  showLoginScreen();
+
+  if (!isFirebaseConfigured()) {
+    loginBtn.disabled = true;
+    configHelp.classList.remove("hidden");
+    setLoginStatus("firebase-config.jsを設定してください。", true);
+    return;
+  }
+
+  try {
+    const app = initializeApp(firebaseConfig);
+    auth = getAuth(app);
+    db = getFirestore(app);
+
+    // リダイレクトログインから戻った際のエラーを明示します。
+    try {
+      await getRedirectResult(auth);
+    } catch (error) {
+      console.error(error);
+      setLoginStatus(`ログインに失敗しました：${friendlyError(error)}`, true);
+    }
+
+    onAuthStateChanged(auth, user => {
+      if (user) {
+        currentUser = user;
+        setLoginStatus("");
+        renderUser(user);
+        showAppScreen();
+        subscribeReviews(user.uid);
+      } else {
+        currentUser = null;
+        works = [];
+        selectedIds.clear();
+        resetForm();
+        renderAll();
+
+        if (unsubscribeReviews) {
+          unsubscribeReviews();
+          unsubscribeReviews = null;
+        }
+
+        showLoginScreen();
+        setLoginStatus("");
+      }
+    });
+  } catch (error) {
+    console.error(error);
+    loginBtn.disabled = true;
+    configHelp.classList.remove("hidden");
+    setLoginStatus(`Firebaseの初期化に失敗しました：${friendlyError(error)}`, true);
+  }
+}
+
+initializeFirebase();
