@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="theme-color" content="#4c66e5" />
+  <meta name="theme-color" content="#151821" />
   <title>Anime Score Lab</title>
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -12,7 +12,7 @@
     <div class="login-card">
       <p class="eyebrow">CLOUD ANIME REVIEW TOOL</p>
       <h1>Anime Score Lab</h1>
-      <p>10項目の評価をGoogleアカウントに保存し、PCとスマートフォンで同期します。</p>
+      <p>6つの評価観点をGoogleアカウントに保存し、PCとスマートフォンで同期します。</p>
       <button id="loginBtn" class="google-login" type="button">
         <span class="google-mark" aria-hidden="true">G</span>
         Googleでログイン
@@ -31,7 +31,7 @@
       <div>
         <p class="eyebrow">CLOUD ANIME REVIEW TOOL</p>
         <h1>Anime Score Lab</h1>
-        <p class="subtitle">10項目を100点満点で評価し、作品ごとの強みを比較します。</p>
+        <p class="subtitle">6つの観点を100点満点で評価し、作品ごとの強みを比較します。</p>
       </div>
       <div class="account-area">
         <div id="userProfile" class="user-profile">
@@ -42,19 +42,14 @@
           </div>
         </div>
         <div class="header-actions">
-          <button id="exportBtn" class="secondary" type="button">JSONを書き出す</button>
-          <label class="button secondary">
-            JSONを読み込む
-            <input id="importInput" type="file" accept=".json,application/json" hidden />
-          </label>
-          <button id="logoutBtn" class="secondary" type="button">ログアウト</button>
+<button id="logoutBtn" class="secondary" type="button">ログアウト</button>
         </div>
       </div>
     </header>
 
     <div id="syncBanner" class="sync-banner" aria-live="polite">Firestoreと同期しています…</div>
 
-    <main class="layout">
+    <main class="dashboard-layout">
       <section class="panel editor-panel">
         <div class="section-title">
           <div>
@@ -73,10 +68,17 @@
               <input id="title" type="text" placeholder="例：進撃の巨人" required maxlength="80" />
             </label>
             <label>
-              <span>ジャンル・補足</span>
-              <input id="genre" type="text" placeholder="例：ダークファンタジー" maxlength="80" />
+              <span>ジャンル</span>
+              <select id="genre" aria-label="作品のジャンル" required>
+                <option value="">選択してください</option>
+              </select>
             </label>
           </div>
+
+          <label class="episode-field">
+            <span>話数</span>
+            <input id="episodes" type="number" min="0" max="9999" step="1" value="0" placeholder="例：24" />
+          </label>
 
           <div id="scoreInputs" class="score-list"></div>
 
@@ -91,79 +93,249 @@
         </form>
       </section>
 
-      <section class="panel chart-panel">
-        <div class="section-title">
-          <div>
-            <p class="eyebrow">COMPARE</p>
-            <h2>レーダーチャート</h2>
-          </div>
-          <div class="chart-actions">
+      <section class="right-dashboard">
+        <section class="panel compare-panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">COMPARE</p>
+              <h2>比較する作品の検索</h2>
+            </div>
             <button id="clearCompareBtn" class="text-button" type="button">比較を解除</button>
           </div>
-        </div>
 
-        <div id="chartEmpty" class="empty-state">
-          保存した作品から、比較したい作品を選択してください。
-        </div>
+          <section class="compare-picker" aria-labelledby="comparePickerTitle">
+            <div class="compare-picker-heading">
+              <div>
+                <h3 id="comparePickerTitle">比較対象を選択</h3>
+                <p>作品名・ジャンルで検索し、最大6作品まで比較できます。</p>
+              </div>
+              <span id="comparePickerCount" class="compare-picker-count">0 / 6</span>
+            </div>
 
-        <div id="chartWrap" class="chart-wrap hidden">
-          <svg id="radarChart" viewBox="0 0 760 620" role="img" aria-label="アニメ評価のレーダーチャート"></svg>
-          <div id="legend" class="legend"></div>
-        </div>
+            <label class="compare-search-box">
+              <span class="sr-only">比較する作品を検索</span>
+              <input id="compareSearchInput" type="search" placeholder="作品名・ジャンルで検索" autocomplete="off" />
+            </label>
 
-        <div class="summary-grid">
-          <article class="summary-card">
-            <span>登録作品数</span>
-            <strong id="workCount">0</strong>
-          </article>
-          <article class="summary-card">
-            <span>比較中</span>
-            <strong id="compareCount">0</strong>
-          </article>
-          <article class="summary-card">
-            <span>平均点トップ</span>
-            <strong id="topWork">―</strong>
-          </article>
-        </div>
+            <div id="compareSearchResults" class="compare-search-results hidden" role="listbox"></div>
+            <div id="selectedCompareWorks" class="selected-compare-works"></div>
+          </section>
+        </section>
+
+        <section class="panel score-comparison-panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">SCORES</p>
+              <h2>比較作品の各観点の点数</h2>
+            </div>
+          </div>
+
+          <div id="scoreComparisonEmpty" class="empty-state">
+            比較する作品を選択すると、各観点の点数が表示されます。
+          </div>
+          <div id="scoreComparisonTableWrap" class="score-comparison-table-wrap hidden">
+            <table class="score-comparison-table">
+              <thead id="scoreComparisonHead"></thead>
+              <tbody id="scoreComparisonBody"></tbody>
+            </table>
+          </div>
+
+          <div id="comparisonSaveBar" class="comparison-save-bar hidden" aria-live="polite">
+            <div>
+              <strong id="comparisonSaveMessage">点数が変更されています</strong>
+              <span>保存するとランキングや集計にも反映されます。</span>
+            </div>
+            <div class="comparison-save-actions">
+              <button id="comparisonDiscardBtn" class="secondary" type="button">変更を破棄</button>
+              <button id="comparisonSaveBtn" class="primary" type="button">変更を保存</button>
+            </div>
+          </div>
+
+          <div id="chartWrap" class="chart-wrap hidden">
+            <svg id="radarChart" viewBox="0 0 760 620" role="img" aria-label="アニメ評価のレーダーチャート"></svg>
+            <div id="radarTooltip" class="radar-tooltip hidden" role="status" aria-live="polite"></div>
+            <div id="legend" class="legend"></div>
+          </div>
+        </section>
+
+        <section class="category-ranking-grid">
+          <section class="panel compact-ranking-panel">
+            <p class="eyebrow">RANKING 01</p>
+            <h3 id="categoryTitle-story">ストーリー</h3>
+            <div class="category-ranking-controls" data-category-key="story">
+              <div id="categoryOrderControls-story" class="category-order-controls">
+                <button id="categoryAsc-story" class="ranking-order-button" type="button">昇順</button>
+                <button id="categoryDesc-story" class="ranking-order-button active" type="button">降順</button>
+              </div>
+              <button id="categoryApproxClear-story" class="approx-clear-button hidden" type="button">
+                近似値表示を解除
+              </button>
+            </div>
+            <ol id="categoryList-story" class="ranking-list compact"></ol>
+            <button id="categoryToggle-story" class="show-more-button hidden" type="button">すべて表示</button>
+          </section>
+          <section class="panel compact-ranking-panel">
+            <p class="eyebrow">RANKING 02</p>
+            <h3 id="categoryTitle-visual">映像・演出</h3>
+            <div class="category-ranking-controls" data-category-key="visual">
+              <div id="categoryOrderControls-visual" class="category-order-controls">
+                <button id="categoryAsc-visual" class="ranking-order-button" type="button">昇順</button>
+                <button id="categoryDesc-visual" class="ranking-order-button active" type="button">降順</button>
+              </div>
+              <button id="categoryApproxClear-visual" class="approx-clear-button hidden" type="button">
+                近似値表示を解除
+              </button>
+            </div>
+            <ol id="categoryList-visual" class="ranking-list compact"></ol>
+            <button id="categoryToggle-visual" class="show-more-button hidden" type="button">すべて表示</button>
+          </section>
+          <section class="panel compact-ranking-panel">
+            <p class="eyebrow">RANKING 03</p>
+            <h3 id="categoryTitle-emotion">感情表現</h3>
+            <div class="category-ranking-controls" data-category-key="emotion">
+              <div id="categoryOrderControls-emotion" class="category-order-controls">
+                <button id="categoryAsc-emotion" class="ranking-order-button" type="button">昇順</button>
+                <button id="categoryDesc-emotion" class="ranking-order-button active" type="button">降順</button>
+              </div>
+              <button id="categoryApproxClear-emotion" class="approx-clear-button hidden" type="button">
+                近似値表示を解除
+              </button>
+            </div>
+            <ol id="categoryList-emotion" class="ranking-list compact"></ol>
+            <button id="categoryToggle-emotion" class="show-more-button hidden" type="button">すべて表示</button>
+          </section>
+          <section class="panel compact-ranking-panel">
+            <p class="eyebrow">RANKING 04</p>
+            <h3 id="categoryTitle-moving">感動</h3>
+            <div class="category-ranking-controls" data-category-key="moving">
+              <div id="categoryOrderControls-moving" class="category-order-controls">
+                <button id="categoryAsc-moving" class="ranking-order-button" type="button">昇順</button>
+                <button id="categoryDesc-moving" class="ranking-order-button active" type="button">降順</button>
+              </div>
+              <button id="categoryApproxClear-moving" class="approx-clear-button hidden" type="button">
+                近似値表示を解除
+              </button>
+            </div>
+            <ol id="categoryList-moving" class="ranking-list compact"></ol>
+            <button id="categoryToggle-moving" class="show-more-button hidden" type="button">すべて表示</button>
+          </section>
+          <section class="panel compact-ranking-panel">
+            <p class="eyebrow">RANKING 05</p>
+            <h3 id="categoryTitle-theme">テーマ性</h3>
+            <div class="category-ranking-controls" data-category-key="theme">
+              <div id="categoryOrderControls-theme" class="category-order-controls">
+                <button id="categoryAsc-theme" class="ranking-order-button" type="button">昇順</button>
+                <button id="categoryDesc-theme" class="ranking-order-button active" type="button">降順</button>
+              </div>
+              <button id="categoryApproxClear-theme" class="approx-clear-button hidden" type="button">
+                近似値表示を解除
+              </button>
+            </div>
+            <ol id="categoryList-theme" class="ranking-list compact"></ol>
+            <button id="categoryToggle-theme" class="show-more-button hidden" type="button">すべて表示</button>
+          </section>
+          <section class="panel compact-ranking-panel">
+            <p class="eyebrow">RANKING 06</p>
+            <h3 id="categoryTitle-addiction">中毒性</h3>
+            <div class="category-ranking-controls" data-category-key="addiction">
+              <div id="categoryOrderControls-addiction" class="category-order-controls">
+                <button id="categoryAsc-addiction" class="ranking-order-button" type="button">昇順</button>
+                <button id="categoryDesc-addiction" class="ranking-order-button active" type="button">降順</button>
+              </div>
+              <button id="categoryApproxClear-addiction" class="approx-clear-button hidden" type="button">
+                近似値表示を解除
+              </button>
+            </div>
+            <ol id="categoryList-addiction" class="ranking-list compact"></ol>
+            <button id="categoryToggle-addiction" class="show-more-button hidden" type="button">すべて表示</button>
+          </section>
+        </section>
       </section>
 
-      <section class="panel ranking-panel">
+      <section class="panel ai-summary-panel full-width">
         <div class="section-title">
           <div>
-            <p class="eyebrow">RANKING</p>
-            <h2>ランキング</h2>
+            <p class="eyebrow">INSIGHT</p>
+            <h2>登録済み作品のAIサマリー</h2>
           </div>
-          <p class="ranking-note">10項目の平均点順</p>
         </div>
-
-        <div class="ranking-grid">
-          <section class="ranking-block" aria-labelledby="overallRankingTitle">
-            <div class="ranking-heading">
-              <h3 id="overallRankingTitle">総合ランキング</h3>
-              <span id="overallRankingCount">0作品</span>
-            </div>
-            <ol id="overallRanking" class="ranking-list"></ol>
-            <div id="overallRankingEmpty" class="ranking-empty">作品を登録するとランキングが表示されます。</div>
-          </section>
-
-          <section class="ranking-block" aria-labelledby="genreRankingTitle">
-            <div class="ranking-heading genre-heading">
-              <div>
-                <h3 id="genreRankingTitle">ジャンル別ランキング</h3>
-                <span id="genreRankingCount">0作品</span>
-              </div>
-              <label class="genre-filter">
-                <span class="sr-only">ジャンルを選択</span>
-                <select id="genreRankingSelect" aria-label="ランキングのジャンルを選択"></select>
-              </label>
-            </div>
-            <ol id="genreRanking" class="ranking-list"></ol>
-            <div id="genreRankingEmpty" class="ranking-empty">ジャンルを設定した作品を登録してください。</div>
-          </section>
+        <div id="aiSummary" class="ai-summary-content">
+          作品を登録すると、評価傾向の要約が表示されます。
         </div>
       </section>
 
-      <section class="panel library-panel">
+      <section class="stats-grid full-width">
+        <article class="panel stat-card">
+          <span>総視聴作品数</span>
+          <strong id="totalWorksStat">0</strong>
+          <small>作品</small>
+        </article>
+        <article class="panel stat-card">
+          <span>総視聴話数</span>
+          <strong id="totalEpisodesStat">0</strong>
+          <small>話</small>
+        </article>
+        <article class="panel stat-card">
+          <span>推定総視聴時間</span>
+          <strong id="totalWatchTimeStat">0時間</strong>
+          <small>1話25分換算</small>
+        </article>
+      </section>
+
+      <section class="genre-stats-grid full-width">
+        <section class="panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">GENRES 01–10</p>
+              <h2>ジャンル別作品数</h2>
+            </div>
+          </div>
+          <div id="genreStatsFirst" class="genre-count-list"></div>
+        </section>
+        <section class="panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">GENRES 11–20</p>
+              <h2>ジャンル別作品数</h2>
+            </div>
+          </div>
+          <div id="genreStatsSecond" class="genre-count-list"></div>
+        </section>
+      </section>
+
+      <section class="ranking-bottom-grid full-width">
+        <section class="panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">OVERALL</p>
+              <h2>総合ランキング</h2>
+            </div>
+            <span id="overallRankingCount">0作品</span>
+          </div>
+          <ol id="overallRanking" class="ranking-list"></ol>
+          <div id="overallRankingEmpty" class="ranking-empty">作品を登録するとランキングが表示されます。</div>
+          <button id="overallRankingToggle" class="show-more-button hidden" type="button">すべて表示</button>
+        </section>
+
+        <section class="panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">BY GENRE</p>
+              <h2>ジャンル別ランキング</h2>
+            </div>
+            <label class="genre-filter">
+              <span class="sr-only">ジャンルを選択</span>
+              <select id="genreRankingSelect" aria-label="ランキングのジャンルを選択"></select>
+            </label>
+          </div>
+          <span id="genreRankingCount">0作品</span>
+          <ol id="genreRanking" class="ranking-list"></ol>
+          <div id="genreRankingEmpty" class="ranking-empty">ジャンルを設定した作品を登録してください。</div>
+          <button id="genreRankingToggle" class="show-more-button hidden" type="button">すべて表示</button>
+        </section>
+      </section>
+
+      <section class="panel library-panel full-width">
         <div class="section-title">
           <div>
             <p class="eyebrow">LIBRARY</p>
@@ -177,6 +349,7 @@
 
         <div id="animeList" class="anime-list"></div>
         <div id="libraryEmpty" class="empty-state">まだ作品が登録されていません。</div>
+        <button id="libraryToggle" class="show-more-button hidden" type="button">すべて表示</button>
       </section>
     </main>
   </div>
@@ -207,6 +380,6 @@
     </article>
   </template>
 
-  <script type="module" src="app.js"></script>
+  <script type="module" src="app.js?v=4.4.0"></script>
 </body>
 </html>
