@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#151821" />
   <title>Anime Score Lab</title>
-  <link rel="stylesheet" href="style.css?v=4.5.0" />
+  <link rel="stylesheet" href="style.css?v=4.6.0" />
 </head>
 <body>
   <section id="loginScreen" class="login-screen">
@@ -67,12 +67,11 @@
               <span>作品名</span>
               <input id="title" type="text" placeholder="例：進撃の巨人" required maxlength="80" />
             </label>
-            <label>
-              <span>ジャンル</span>
-              <select id="genre" aria-label="作品のジャンル" required>
-                <option value="">選択してください</option>
-              </select>
-            </label>
+            <div class="genre-multi-field">
+              <span class="field-label">ジャンル</span>
+              <div id="genreOptions" class="genre-options" role="group" aria-label="作品のジャンル"></div>
+              <p class="genre-help">複数選択できます。</p>
+            </div>
           </div>
 
           <label class="episode-field">
@@ -380,6 +379,6 @@
     </article>
   </template>
 
-  <script type="module" src="app.js?v=4.5.0"></script>
+  <script type="module" src="app.js?v=4.6.0"></script>
 </body>
 </html>

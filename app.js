@@ -162,7 +162,7 @@ const genreRankingToggle = document.getElementById("genreRankingToggle");
 const libraryToggle = document.getElementById("libraryToggle");
 const editingId = document.getElementById("editingId");
 const titleInput = document.getElementById("title");
-const genreInput = document.getElementById("genre");
+const genreOptions = document.getElementById("genreOptions");
 const episodesInput = document.getElementById("episodes");
 const memoInput = document.getElementById("memo");
 const searchInput = document.getElementById("searchInput");
@@ -320,13 +320,39 @@ function migrateLegacyScores(rawScores) {
   return Object.fromEntries(CATEGORY_KEYS.map(key => [key, 0]));
 }
 
+function normalizeGenres(value) {
+  if (Array.isArray(value)) {
+    return [...new Set(
+      value
+        .map(item => String(item || "").trim())
+        .filter(Boolean)
+    )];
+  }
+
+  const text = String(value || "").trim();
+  if (!text) return [];
+
+  return [...new Set(
+    text
+      .split(/[、,\\/|]/)
+      .map(item => item.trim())
+      .filter(Boolean)
+  )];
+}
+
+function genreText(work) {
+  const genres = normalizeGenres(work?.genres ?? work?.genre);
+  return genres.length ? genres.join("・") : "ジャンル未設定";
+}
+
 function normalizeWork(item, fallbackId = crypto.randomUUID()) {
   const legacyScores = Array.isArray(item?.scores) && item.scores.length >= 10;
 
   return {
     id: String(item?.id || fallbackId),
     title: String(item?.title || "").trim(),
-    genre: String(item?.genre || "").trim(),
+    genres: normalizeGenres(item?.genres ?? item?.genre),
+    genre: normalizeGenres(item?.genres ?? item?.genre).join("、"),
     memo: String(item?.memo || "").trim(),
     episodes: Math.max(0, Math.round(Number(item?.episodes || 0))),
     scores: migrateLegacyScores(item?.scores),
@@ -347,31 +373,48 @@ function scoreValue(scores, categoryKey) {
   return migrateLegacyScores(scores)[categoryKey] ?? 0;
 }
 
-function populateGenreOptions(selectedValue = "") {
-  const currentValue = String(selectedValue || "").trim();
-  const fragment = document.createDocumentFragment();
-
-  const placeholder = document.createElement("option");
-  placeholder.value = "";
-  placeholder.textContent = "選択してください";
-  fragment.appendChild(placeholder);
+function populateGenreOptions(selectedValues = []) {
+  const selected = new Set(normalizeGenres(selectedValues));
+  genreOptions.innerHTML = "";
 
   GENRES.forEach(genre => {
-    const option = document.createElement("option");
-    option.value = genre;
-    option.textContent = genre;
-    fragment.appendChild(option);
+    const label = document.createElement("label");
+    label.className = "genre-option";
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.value = genre;
+    checkbox.checked = selected.has(genre);
+
+    const text = document.createElement("span");
+    text.textContent = genre;
+
+    label.append(checkbox, text);
+    genreOptions.appendChild(label);
   });
 
-  if (currentValue && !GENRES.includes(currentValue)) {
-    const legacyOption = document.createElement("option");
-    legacyOption.value = currentValue;
-    legacyOption.textContent = `${currentValue}（既存値）`;
-    fragment.appendChild(legacyOption);
-  }
+  normalizeGenres(selectedValues)
+    .filter(genre => !GENRES.includes(genre))
+    .forEach(genre => {
+      const label = document.createElement("label");
+      label.className = "genre-option legacy";
 
-  genreInput.replaceChildren(fragment);
-  genreInput.value = currentValue;
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.value = genre;
+      checkbox.checked = true;
+
+      const text = document.createElement("span");
+      text.textContent = `${genre}（既存値）`;
+
+      label.append(checkbox, text);
+      genreOptions.appendChild(label);
+    });
+}
+
+function getSelectedGenres() {
+  return [...genreOptions.querySelectorAll('input[type="checkbox"]:checked')]
+    .map(input => input.value);
 }
 
 function captureFormScoreBaseline(scores = getScores()) {
@@ -398,7 +441,7 @@ function updateCategoryApproximationFromForm(categoryKey, value) {
 }
 
 function initializeStaticUi() {
-  populateGenreOptions("");
+  populateGenreOptions([]);
   createScoreInputs();
   captureFormScoreBaseline();
 }
@@ -475,7 +518,7 @@ function resetForm() {
   animeForm.reset();
   editingId.value = "";
   titleInput.value = "";
-  populateGenreOptions("");
+  populateGenreOptions([]);
   memoInput.value = "";
   episodesInput.value = "0";
   const defaultScores = Object.fromEntries(
@@ -504,7 +547,8 @@ animeForm.addEventListener("submit", async event => {
   const work = normalizeWork({
     id: editingId.value || crypto.randomUUID(),
     title: titleInput.value,
-    genre: genreInput.value,
+    genres: getSelectedGenres(),
+    genre: getSelectedGenres().join("、"),
     memo: memoInput.value,
     episodes: Math.max(0, Math.round(Number(episodesInput.value || 0))),
     scores: getScores(),
@@ -512,6 +556,11 @@ animeForm.addEventListener("submit", async event => {
   });
 
   if (!work.title) return;
+
+  if (!work.genres.length) {
+    alert("ジャンルを1つ以上選択してください。");
+    return;
+  }
 
   setFormBusy(true);
   setSyncStatus(IS_LOCAL ? "ローカルへ保存しています…" : "Firestoreへ保存しています…");
@@ -529,7 +578,8 @@ animeForm.addEventListener("submit", async event => {
     } else {
       await setDoc(reviewDocument(work.id), {
         title: work.title,
-        genre: work.genre,
+        genres: work.genres,
+        genre: work.genres.join("、"),
         memo: work.memo,
         episodes: work.episodes,
         scores: work.scores,
@@ -620,7 +670,7 @@ function renderLibrary() {
     const card = template.content.firstElementChild.cloneNode(true);
 
     card.querySelector(".anime-title").textContent = work.title;
-    card.querySelector(".anime-genre").textContent = work.genre || "ジャンル未設定";
+    card.querySelector(".anime-genre").textContent = genreText(work);
     card.querySelector(".anime-strength").textContent =
       `強み：${strongestCategories(work)}（最高 ${Math.max(...scoreValues(work.scores))}点）`;
     card.querySelector(".anime-average").textContent = average(work.scores);
@@ -649,7 +699,7 @@ function renderLibrary() {
     card.querySelector(".edit-btn").addEventListener("click", () => {
       editingId.value = work.id;
       titleInput.value = work.title;
-      populateGenreOptions(work.genre);
+      populateGenreOptions(work.genres ?? work.genre);
       memoInput.value = work.memo;
       episodesInput.value = String(work.episodes || 0);
       clearAllCategoryApproximations();
@@ -757,7 +807,7 @@ function renderCompareSearchResults() {
   const matches = works
     .filter(work =>
       !selectedIds.has(work.id) &&
-      `${work.title} ${work.genre}`.toLowerCase().includes(query)
+      `${work.title} ${genreText(work)}`.toLowerCase().includes(query)
     )
     .slice(0, 8);
 
@@ -777,7 +827,7 @@ function renderCompareSearchResults() {
     >
       <span>
         <strong>${escapeHtml(work.title)}</strong>
-        <small>${escapeHtml(work.genre || "ジャンル未設定")}</small>
+        <small>${escapeHtml(genreText(work))}</small>
       </span>
       <span class="compare-result-score">平均 ${average(work.scores)}</span>
     </button>
@@ -1197,7 +1247,7 @@ function buildAiSummary() {
 
   const genreCounts = GENRES.map(genre => ({
     genre,
-    works: works.filter(work => work.genre === genre)
+    works: works.filter(work => normalizeGenres(work.genres ?? work.genre).includes(genre))
   }))
     .filter(item => item.works.length > 0)
     .map(item => ({
@@ -1301,7 +1351,7 @@ function renderStatistics() {
 
   const genreCounts = GENRES.map(genre => ({
     genre,
-    count: works.filter(work => work.genre === genre).length
+    count: works.filter(work => normalizeGenres(work.genres ?? work.genre).includes(genre)).length
   }));
 
   const renderGenreGroup = items => items.map(item => `
@@ -1531,13 +1581,8 @@ function renderChart() {
   });
 }
 
-function splitGenres(genreText) {
-  const genres = String(genreText || "")
-    .split(/[、,，/／|｜]+/)
-    .map(genre => genre.trim())
-    .filter(Boolean);
-
-  return genres.length ? [...new Set(genres)] : ["未設定"];
+function splitGenres(value) {
+  return normalizeGenres(value);
 }
 
 function compareByScoreThenTitle(a, b) {
@@ -1548,7 +1593,7 @@ function compareByScoreThenTitle(a, b) {
 
 function rankingItemHtml(work, index, scoreValue, scoreLabel, rankNumber = index + 1) {
   const title = String(work?.title ?? "作品名未設定");
-  const genres = splitGenres(work?.genre).join("・");
+  const genres = normalizeGenres(work?.genres ?? work?.genre).join("・");
   const numericScore = Number(scoreValue);
   const displayScore = Number.isFinite(numericScore) ? Math.round(numericScore) : "―";
 
@@ -1568,7 +1613,7 @@ function rankingItemHtml(work, index, scoreValue, scoreLabel, rankNumber = index
 }
 
 function availableGenres() {
-  return [...new Set(works.flatMap(work => splitGenres(work.genre)))]
+  return [...new Set(works.flatMap(work => normalizeGenres(work.genres ?? work.genre)))]
     .sort((a, b) => {
       if (a === "未設定") return 1;
       if (b === "未設定") return -1;
@@ -1660,7 +1705,7 @@ function renderRankings() {
   const selectedGenre = genreRankingSelect.value;
   const genreWorks = selectedGenre
     ? works
-        .filter(work => splitGenres(work.genre).includes(selectedGenre))
+        .filter(work => normalizeGenres(work.genres ?? work.genre).includes(selectedGenre))
         .sort(compareByScoreThenTitle)
     : [];
 
