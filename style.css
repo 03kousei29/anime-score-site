@@ -1429,3 +1429,86 @@ body:has(.sync-banner.local) .environment-badge {
 .score-row:focus-within .score-name {
   color: var(--accent-soft);
 }
+
+
+/* Ver4.5: 10-work comparison and enhanced insights */
+.legend {
+  align-items: center;
+}
+
+.legend-toggle {
+  border: 1px solid rgba(199, 168, 91, 0.18);
+  background: rgba(10, 12, 18, 0.5);
+  padding: 7px 10px;
+}
+
+.legend-toggle:hover {
+  background: rgba(199, 168, 91, 0.1);
+  transform: none;
+}
+
+.legend-toggle.is-hidden {
+  opacity: 0.38;
+  text-decoration: line-through;
+}
+
+.legend-toggle.is-hidden .legend-swatch {
+  filter: grayscale(1);
+}
+
+.insight-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.insight-heading strong {
+  color: #f1e7ca;
+  font-family: "Yu Mincho", "Hiragino Mincho ProN", serif;
+  font-size: 1.18rem;
+}
+
+.insight-mark {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(226, 207, 150, 0.38);
+  border-radius: 50%;
+  color: var(--accent-soft);
+  background: rgba(199, 168, 91, 0.1);
+}
+
+.insight-copy {
+  display: grid;
+  gap: 8px;
+}
+
+.insight-copy p {
+  margin: 0;
+  color: #d8d2c7;
+  line-height: 1.9;
+}
+
+.insight-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.insight-facts span {
+  padding: 6px 10px;
+  border: 1px solid rgba(199, 168, 91, 0.2);
+  border-radius: 999px;
+  color: var(--accent-soft);
+  background: rgba(199, 168, 91, 0.07);
+  font-size: 0.76rem;
+}
+
+@media (max-width: 720px) {
+  .legend-toggle {
+    max-width: 100%;
+  }
+}

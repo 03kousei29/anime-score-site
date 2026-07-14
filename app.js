@@ -79,17 +79,23 @@ const GENRES = [
 ];
 
 const COLORS = [
-  "#4c66e5",
-  "#ea5b7b",
-  "#10a57b",
-  "#f29c38",
-  "#8a63d2",
-  "#2d9bd3"
+  "#d7b95f",
+  "#7fa8d8",
+  "#d77f91",
+  "#70b79e",
+  "#b08bd1",
+  "#d89658",
+  "#7fc0cf",
+  "#c7a062",
+  "#8d9bd1",
+  "#c477b2"
 ];
 
 let works = [];
 let selectedIds = new Set();
+const hiddenRadarIds = new Set();
 const DEFAULT_VISIBLE_COUNT = 3;
+const MAX_COMPARE_COUNT = 10;
 let showAllOverall = false;
 let showAllGenre = false;
 let showAllCategory = false;
@@ -545,6 +551,7 @@ animeForm.addEventListener("submit", async event => {
 document.getElementById("resetBtn").addEventListener("click", resetForm);
 document.getElementById("clearCompareBtn").addEventListener("click", () => {
   selectedIds.clear();
+  hiddenRadarIds.clear();
   comparisonDrafts.clear();
   clearAllCategoryApproximations();
   compareSearchInput.value = "";
@@ -690,14 +697,15 @@ function escapeHtml(value) {
 
 function updateComparisonSelection(workId, shouldSelect) {
   if (shouldSelect) {
-    if (selectedIds.size >= 6 && !selectedIds.has(workId)) {
-      alert("比較できる作品は最大6作品です。");
+    if (selectedIds.size >= MAX_COMPARE_COUNT && !selectedIds.has(workId)) {
+      alert(`比較できる作品は最大${MAX_COMPARE_COUNT}作品です。`);
       return false;
     }
     selectedIds.add(workId);
   } else {
     selectedIds.delete(workId);
     comparisonDrafts.delete(workId);
+    hiddenRadarIds.delete(workId);
   }
 
   renderComparisonPicker();
@@ -710,7 +718,7 @@ function updateComparisonSelection(workId, shouldSelect) {
 
 function renderSelectedCompareWorks() {
   const selectedWorks = works.filter(work => selectedIds.has(work.id));
-  comparePickerCount.textContent = `${selectedWorks.length} / 6`;
+  comparePickerCount.textContent = `${selectedWorks.length} / ${MAX_COMPARE_COUNT}`;
 
   if (!selectedWorks.length) {
     selectedCompareWorks.innerHTML =
@@ -1161,35 +1169,120 @@ function renderCategoryRankingCards() {
 
 function buildAiSummary() {
   if (!works.length) {
-    return "作品を登録すると、評価傾向の要約が表示されます。";
+    return {
+      headline: "まだ分析できる作品がありません",
+      paragraphs: [
+        "作品を登録すると、評価観点・ジャンル・視聴量から好みの傾向を自動で要約します。"
+      ],
+      facts: []
+    };
   }
 
+  const rankedWorks = [...works].sort(compareByScoreThenTitle);
+  const topWork = rankedWorks[0];
   const categoryAverages = CATEGORIES.map(category => ({
+    key: category.key,
     label: category.label,
     value: Math.round(
-      works.reduce((sum, work) => sum + scoreValue(work.scores, category.key), 0) / works.length
+      works.reduce(
+        (sum, work) => sum + scoreValue(work.scores, category.key),
+        0
+      ) / works.length
     )
   })).sort((a, b) => b.value - a.value);
 
+  const strongest = categoryAverages[0];
+  const secondStrongest = categoryAverages[1];
+  const strictest = categoryAverages[categoryAverages.length - 1];
+
   const genreCounts = GENRES.map(genre => ({
     genre,
-    count: works.filter(work => work.genre === genre).length
-  })).filter(item => item.count > 0).sort((a, b) => b.count - a.count);
+    works: works.filter(work => work.genre === genre)
+  }))
+    .filter(item => item.works.length > 0)
+    .map(item => ({
+      genre: item.genre,
+      count: item.works.length,
+      average: Math.round(
+        item.works.reduce(
+          (sum, work) => sum + average(work.scores),
+          0
+        ) / item.works.length
+      )
+    }))
+    .sort((a, b) => {
+      if (b.count !== a.count) return b.count - a.count;
+      return b.average - a.average;
+    });
 
-  const topWork = [...works].sort(compareByAverageThenTitle)[0];
-  const strongest = categoryAverages[0];
-  const weakest = categoryAverages[categoryAverages.length - 1];
-  const favoriteGenre = genreCounts[0];
+  const favoriteGenres = genreCounts.slice(0, 3);
+  const highRatedWorks = works.filter(work => average(work.scores) >= 85);
+  const totalEpisodes = works.reduce(
+    (sum, work) => sum + Math.max(0, Number(work.episodes || 0)),
+    0
+  );
 
-  const parts = [
-    `登録作品は${works.length}作品です。`,
-    topWork ? `総合評価トップは「${topWork.title}」で、平均${average(topWork.scores)}点です。` : "",
-    strongest ? `全体では「${strongest.label}」の平均が${strongest.value}点と最も高く、` : "",
-    weakest ? `「${weakest.label}」は平均${weakest.value}点です。` : "",
-    favoriteGenre ? `最も多く視聴しているジャンルは「${favoriteGenre.genre}」で${favoriteGenre.count}作品です。` : ""
-  ];
+  const preferenceSentence =
+    strongest && secondStrongest
+      ? `特に「${strongest.label}」と「${secondStrongest.label}」を高く評価する傾向があります。`
+      : "";
 
-  return parts.filter(Boolean).join("");
+  const strictSentence =
+    strictest
+      ? `一方、「${strictest.label}」の平均は${strictest.value}点で、6観点の中では最も厳しく評価しています。`
+      : "";
+
+  const genreSentence = favoriteGenres.length
+    ? `視聴数が多いジャンルは${favoriteGenres
+        .map(item => `「${item.genre}」${item.count}作品`)
+        .join("、")}です。`
+    : "ジャンル傾向を出すには、作品へジャンルを設定してください。";
+
+  const recommendation =
+    strongest?.key === "story"
+      ? "物語構成や伏線回収、人間関係が緻密な作品との相性が良さそうです。"
+      : strongest?.key === "visual"
+        ? "映像表現やアクション、音響に力を入れた作品との相性が良さそうです。"
+        : strongest?.key === "emotion" || strongest?.key === "moving"
+          ? "人物の感情を丁寧に描き、心を強く動かす作品との相性が良さそうです。"
+          : strongest?.key === "theme"
+            ? "現実へ持ち帰れる教訓やメッセージ性のある作品との相性が良さそうです。"
+            : "テンポが良く、繰り返し視聴したくなる作品との相性が良さそうです。";
+
+  return {
+    headline: `あなたの視聴傾向：${strongest?.label || "分析中"}重視`,
+    paragraphs: [
+      topWork
+        ? `現在の総合1位は「${topWork.title}」で、平均${average(topWork.scores)}点です。`
+        : "",
+      `${preferenceSentence}${strictSentence}`,
+      `${genreSentence}${recommendation}`
+    ].filter(Boolean),
+    facts: [
+      `${works.length}作品を登録`,
+      `${totalEpisodes}話を視聴`,
+      `85点以上：${highRatedWorks.length}作品`
+    ]
+  };
+}
+
+function renderAiSummary() {
+  const summary = buildAiSummary();
+
+  aiSummary.innerHTML = `
+    <div class="insight-heading">
+      <span class="insight-mark" aria-hidden="true">✦</span>
+      <strong>${escapeHtml(summary.headline)}</strong>
+    </div>
+    <div class="insight-copy">
+      ${summary.paragraphs.map(paragraph => `<p>${escapeHtml(paragraph)}</p>`).join("")}
+    </div>
+    ${summary.facts.length
+      ? `<div class="insight-facts">${summary.facts
+          .map(fact => `<span>${escapeHtml(fact)}</span>`)
+          .join("")}</div>`
+      : ""}
+  `;
 }
 
 function renderStatistics() {
@@ -1220,7 +1313,7 @@ function renderStatistics() {
 
   genreStatsFirst.innerHTML = renderGenreGroup(genreCounts.slice(0, 10));
   genreStatsSecond.innerHTML = renderGenreGroup(genreCounts.slice(10, 20));
-  aiSummary.textContent = buildAiSummary();
+  renderAiSummary();
 }
 
 function showRadarTooltip(event, category, selectedWorks) {
@@ -1268,6 +1361,7 @@ function hideRadarTooltip() {
 
 function renderChart() {
   const selectedWorks = works.filter(work => selectedIds.has(work.id));
+  const visibleWorks = selectedWorks.filter(work => !hiddenRadarIds.has(work.id));
   chartWrap.classList.toggle("hidden", selectedWorks.length === 0);
 
   if (!selectedWorks.length) {
@@ -1350,7 +1444,7 @@ function renderChart() {
     }, String(value));
   });
 
-  selectedWorks.forEach((work, workIndex) => {
+  visibleWorks.forEach((work, workIndex) => {
     const color = COLORS[workIndex % COLORS.length];
     const values = scoreValues(work.scores);
     const points = values.map((score, index) =>
@@ -1360,15 +1454,16 @@ function renderChart() {
     append("polygon", {
       points,
       fill: color,
-      "fill-opacity": 0.12,
+      "fill-opacity": visibleWorks.length <= 4 ? 0.1 : 0.035,
       stroke: color,
-      "stroke-width": 3,
+      "stroke-opacity": visibleWorks.length <= 4 ? 0.92 : 0.66,
+      "stroke-width": visibleWorks.length <= 4 ? 2.6 : 1.7,
       "stroke-linejoin": "round"
     });
 
     values.forEach((score, index) => {
       const [x, y] = point(index, radius * (score / 100));
-      const offset = (workIndex - (selectedWorks.length - 1) / 2) * 3;
+      const offset = (workIndex - (visibleWorks.length - 1) / 2) * 2.4;
       const angle = startAngle + index * angleStep;
       const displayX = x + Math.cos(angle + Math.PI / 2) * offset;
       const displayY = y + Math.sin(angle + Math.PI / 2) * offset;
@@ -1387,10 +1482,10 @@ function renderChart() {
       });
 
       pointCircle.addEventListener("mouseenter", event => {
-        showRadarTooltip(event, CATEGORIES[index], selectedWorks);
+        showRadarTooltip(event, CATEGORIES[index], visibleWorks);
       });
       pointCircle.addEventListener("mousemove", event => {
-        showRadarTooltip(event, CATEGORIES[index], selectedWorks);
+        showRadarTooltip(event, CATEGORIES[index], visibleWorks);
       });
       pointCircle.addEventListener("mouseleave", hideRadarTooltip);
       pointCircle.addEventListener("focus", event => {
@@ -1405,12 +1500,35 @@ function renderChart() {
     });
   });
 
-  legend.innerHTML = selectedWorks.map((work, index) => `
-    <div class="legend-item">
-      <span class="legend-swatch" style="background:${COLORS[index % COLORS.length]}"></span>
-      <span>${escapeHtml(work.title)}（平均 ${average(effectiveScores(work))}）</span>
-    </div>
-  `).join("");
+  legend.innerHTML = selectedWorks.map((work, index) => {
+    const hidden = hiddenRadarIds.has(work.id);
+    return `
+      <button
+        type="button"
+        class="legend-item legend-toggle${hidden ? " is-hidden" : ""}"
+        data-work-id="${escapeHtml(work.id)}"
+        aria-pressed="${String(!hidden)}"
+        title="${hidden ? "チャートへ表示" : "チャートから一時的に非表示"}"
+      >
+        <span class="legend-swatch" style="background:${COLORS[index % COLORS.length]}"></span>
+        <span>${escapeHtml(work.title)}（平均 ${average(effectiveScores(work))}）</span>
+      </button>
+    `;
+  }).join("");
+
+  legend.querySelectorAll(".legend-toggle").forEach(button => {
+    button.addEventListener("click", () => {
+      const workId = button.dataset.workId;
+
+      if (hiddenRadarIds.has(workId)) {
+        hiddenRadarIds.delete(workId);
+      } else {
+        hiddenRadarIds.add(workId);
+      }
+
+      renderChart();
+    });
+  });
 }
 
 function splitGenres(genreText) {
