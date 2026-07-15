@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#151821" />
   <title>Anime Score Lab</title>
-  <link rel="stylesheet" href="style.css?v=4.6.0" />
+  <link rel="stylesheet" href="style.css?v=5.0.0" />
 </head>
 <body>
   <section id="loginScreen" class="login-screen">
@@ -335,50 +335,42 @@
       </section>
 
       <section class="panel library-panel full-width">
-        <div class="section-title">
+        <div class="section-title library-section-title">
           <div>
             <p class="eyebrow">LIBRARY</p>
             <h2>作品一覧</h2>
           </div>
-          <label class="search-box">
-            <span class="sr-only">作品を検索</span>
-            <input id="searchInput" type="search" placeholder="作品名で検索" />
-          </label>
+          <div class="library-toolbar">
+            <label class="search-box">
+              <span class="sr-only">作品を検索</span>
+              <input id="searchInput" type="search" placeholder="作品名・ジャンルで検索" />
+            </label>
+            <label class="library-genre-filter">
+              <span class="sr-only">ジャンルで絞り込み</span>
+              <select id="libraryGenreFilter"><option value="">すべてのジャンル</option></select>
+            </label>
+          </div>
         </div>
-
-        <div id="animeList" class="anime-list"></div>
+        <div id="librarySpreadsheetWrap" class="library-spreadsheet-wrap">
+          <table id="librarySpreadsheet" class="library-spreadsheet">
+            <thead id="librarySpreadsheetHead"></thead>
+            <tbody id="librarySpreadsheetBody"></tbody>
+          </table>
+        </div>
+        <div id="libraryCards" class="library-cards"></div>
         <div id="libraryEmpty" class="empty-state">まだ作品が登録されていません。</div>
-        <button id="libraryToggle" class="show-more-button hidden" type="button">すべて表示</button>
+        <div id="librarySaveBar" class="comparison-save-bar hidden" aria-live="polite">
+          <div><strong id="librarySaveMessage">作品一覧に未保存の変更があります</strong><span>変更した作品だけ保存されます。</span></div>
+          <div class="comparison-save-actions">
+            <button id="libraryDiscardBtn" class="secondary" type="button">変更を破棄</button>
+            <button id="librarySaveBtn" class="primary" type="button">変更を保存</button>
+          </div>
+        </div>
       </section>
     </main>
   </div>
 
-  <template id="animeCardTemplate">
-    <article class="anime-card">
-      <div class="anime-card-main">
-        <label class="compare-check">
-          <input type="checkbox" class="compare-checkbox" />
-          <span>比較</span>
-        </label>
-        <div class="anime-info">
-          <h3 class="anime-title"></h3>
-          <p class="anime-genre"></p>
-          <p class="anime-strength"></p>
-        </div>
-        <div class="average-score">
-          <span>平均</span>
-          <strong class="anime-average"></strong>
-        </div>
-      </div>
-      <div class="anime-card-actions">
-        <button class="detail-btn" type="button">詳細</button>
-        <button class="edit-btn" type="button">編集</button>
-        <button class="delete-btn danger" type="button">削除</button>
-      </div>
-      <div class="score-details hidden"></div>
-    </article>
-  </template>
 
-  <script type="module" src="app.js?v=4.6.0"></script>
+  <script type="module" src="app.js?v=5.0.0"></script>
 </body>
 </html>

@@ -99,7 +99,9 @@ const MAX_COMPARE_COUNT = 10;
 let showAllOverall = false;
 let showAllGenre = false;
 let showAllCategory = false;
-let showAllLibrary = false;
+const libraryDrafts = new Map();
+let librarySaveInProgress = false;
+let librarySort = { key: "title", direction: "asc" };
 const categoryRankingExpanded = Object.fromEntries(
   CATEGORY_KEYS.map(key => [key, false])
 );
@@ -133,8 +135,16 @@ const userPhoto = document.getElementById("userPhoto");
 
 const animeForm = document.getElementById("animeForm");
 const scoreInputs = document.getElementById("scoreInputs");
-const animeList = document.getElementById("animeList");
 const libraryEmpty = document.getElementById("libraryEmpty");
+const librarySpreadsheetWrap = document.getElementById("librarySpreadsheetWrap");
+const librarySpreadsheetHead = document.getElementById("librarySpreadsheetHead");
+const librarySpreadsheetBody = document.getElementById("librarySpreadsheetBody");
+const libraryCards = document.getElementById("libraryCards");
+const libraryGenreFilter = document.getElementById("libraryGenreFilter");
+const librarySaveBar = document.getElementById("librarySaveBar");
+const librarySaveMessage = document.getElementById("librarySaveMessage");
+const librarySaveBtn = document.getElementById("librarySaveBtn");
+const libraryDiscardBtn = document.getElementById("libraryDiscardBtn");
 const chartWrap = document.getElementById("chartWrap");
 const radarChart = document.getElementById("radarChart");
 const legend = document.getElementById("legend");
@@ -159,7 +169,6 @@ const genreStatsFirst = document.getElementById("genreStatsFirst");
 const genreStatsSecond = document.getElementById("genreStatsSecond");
 const overallRankingToggle = document.getElementById("overallRankingToggle");
 const genreRankingToggle = document.getElementById("genreRankingToggle");
-const libraryToggle = document.getElementById("libraryToggle");
 const editingId = document.getElementById("editingId");
 const titleInput = document.getElementById("title");
 const genreOptions = document.getElementById("genreOptions");
@@ -608,10 +617,7 @@ document.getElementById("clearCompareBtn").addEventListener("click", () => {
   renderAll();
 });
 
-searchInput.addEventListener("input", () => {
-  showAllLibrary = false;
-  renderLibrary();
-});
+
 genreRankingSelect.addEventListener("change", () => {
   showAllGenre = false;
   renderRankings();
@@ -644,95 +650,124 @@ function updateToggleButton(button, totalCount, expanded, collapsedLabel, expand
   button.setAttribute("aria-expanded", String(expanded));
 }
 
-function renderLibrary() {
-  const queryText = searchInput.value.trim().toLowerCase();
-  const filtered = works.filter(work =>
-    `${work.title} ${work.genre}`.toLowerCase().includes(queryText)
-  );
+function getLibraryEffectiveWork(work) {
+  const draft = libraryDrafts.get(work.id);
+  if (!draft) return work;
+  return { ...work, ...draft, genres: draft.genres ?? work.genres, genre: (draft.genres ?? work.genres ?? []).join("、"), scores: draft.scores ?? work.scores };
+}
 
-  animeList.innerHTML = "";
-  libraryEmpty.classList.toggle("hidden", filtered.length > 0);
+function updateLibraryDraft(workId, updater) {
+  const work = works.find(item => item.id === workId);
+  if (!work) return;
+  const current = {
+    title: work.title,
+    episodes: work.episodes || 0,
+    genres: [...normalizeGenres(work.genres ?? work.genre)],
+    scores: { ...migrateLegacyScores(work.scores) },
+    ...(libraryDrafts.get(workId) || {})
+  };
+  updater(current);
+  const originalGenres = normalizeGenres(work.genres ?? work.genre);
+  const originalScores = migrateLegacyScores(work.scores);
+  const changed = current.title !== work.title || Number(current.episodes) !== Number(work.episodes || 0) ||
+    JSON.stringify(current.genres) !== JSON.stringify(originalGenres) ||
+    CATEGORY_KEYS.some(key => current.scores[key] !== originalScores[key]);
+  if (changed) libraryDrafts.set(workId,current); else libraryDrafts.delete(workId);
+  updateLibrarySaveBar();
+  renderLibrary();
+}
 
-  const visibleWorks = showAllLibrary
-    ? filtered
-    : filtered.slice(0, DEFAULT_VISIBLE_COUNT);
+function updateLibrarySaveBar() {
+  const count = libraryDrafts.size;
+  librarySaveBar.classList.toggle("hidden", count === 0);
+  librarySaveMessage.textContent = count ? `${count}作品に未保存の変更があります` : "作品一覧に未保存の変更があります";
+  librarySaveBtn.disabled = librarySaveInProgress || count === 0;
+  libraryDiscardBtn.disabled = librarySaveInProgress || count === 0;
+  librarySaveBtn.textContent = librarySaveInProgress ? "保存中…" : "変更を保存";
+}
 
-  updateToggleButton(
-    libraryToggle,
-    filtered.length,
-    showAllLibrary,
-    "すべて表示",
-    "3件表示に戻す"
-  );
+function compareLibraryWorks(a,b) {
+  const A=getLibraryEffectiveWork(a), B=getLibraryEffectiveWork(b), d=librarySort.direction === "asc" ? 1 : -1;
+  if (librarySort.key === "title") return A.title.localeCompare(B.title,"ja")*d;
+  let va,vb;
+  if (librarySort.key === "average") { va=average(A.scores); vb=average(B.scores); }
+  else if (librarySort.key === "episodes") { va=Number(A.episodes||0); vb=Number(B.episodes||0); }
+  else { va=scoreValue(A.scores,librarySort.key); vb=scoreValue(B.scores,librarySort.key); }
+  if (va !== vb) return (va-vb)*d;
+  return A.title.localeCompare(B.title,"ja");
+}
+function sortIndicator(key) { return librarySort.key !== key ? "↕" : librarySort.direction === "asc" ? "▲" : "▼"; }
 
-  visibleWorks.forEach(work => {
-    const template = document.getElementById("animeCardTemplate");
-    const card = template.content.firstElementChild.cloneNode(true);
+function renderLibraryHead() {
+  librarySpreadsheetHead.innerHTML = `<tr>
+    <th class="sticky-title"><button class="sheet-sort-button" data-sort-key="title" type="button">作品名 ${sortIndicator("title")}</button></th>
+    <th><button class="sheet-sort-button" data-sort-key="episodes" type="button">話数 ${sortIndicator("episodes")}</button></th>
+    <th>ジャンル</th>
+    <th><button class="sheet-sort-button" data-sort-key="average" type="button">平均 ${sortIndicator("average")}</button></th>
+    ${CATEGORIES.map(c=>`<th><button class="sheet-sort-button" data-sort-key="${c.key}" type="button">${escapeHtml(c.label)} ${sortIndicator(c.key)}</button></th>`).join("")}</tr>`;
+  librarySpreadsheetHead.querySelectorAll(".sheet-sort-button").forEach(button=>button.addEventListener("click",()=>{
+    const key=button.dataset.sortKey;
+    if (librarySort.key === key) librarySort.direction=librarySort.direction === "asc" ? "desc" : "asc";
+    else librarySort={key,direction:key === "title" ? "asc" : "desc"};
+    renderLibrary();
+  }));
+}
 
-    card.querySelector(".anime-title").textContent = work.title;
-    card.querySelector(".anime-genre").textContent = genreText(work);
-    card.querySelector(".anime-strength").textContent =
-      `強み：${strongestCategories(work)}（最高 ${Math.max(...scoreValues(work.scores))}点）`;
-    card.querySelector(".anime-average").textContent = average(work.scores);
+function genreEditorHtml(work) {
+  const selected=new Set(normalizeGenres(work.genres ?? work.genre));
+  return `<details class="sheet-genre-editor"><summary>${escapeHtml(genreText(work))}</summary><div class="sheet-genre-options">
+    ${GENRES.map(g=>`<label><input type="checkbox" value="${escapeHtml(g)}" ${selected.has(g)?"checked":""}/><span>${escapeHtml(g)}</span></label>`).join("")}
+  </div></details>`;
+}
 
-    const checkbox = card.querySelector(".compare-checkbox");
-    checkbox.checked = selectedIds.has(work.id);
-    checkbox.addEventListener("change", () => {
-      const changed = updateComparisonSelection(work.id, checkbox.checked);
-      if (!changed) {
-        checkbox.checked = selectedIds.has(work.id);
-      }
-    });
+function spreadsheetRowHtml(work) {
+  const e=getLibraryEffectiveWork(work);
+  return `<tr data-work-id="${escapeHtml(work.id)}">
+    <td class="sticky-title"><input class="sheet-title-input" type="text" value="${escapeHtml(e.title)}" maxlength="80"/></td>
+    <td><input class="sheet-number-input sheet-episodes-input" type="number" min="0" max="9999" value="${Number(e.episodes||0)}"/></td>
+    <td class="sheet-genre-cell">${genreEditorHtml(e)}</td>
+    <td class="sheet-average-cell">${average(e.scores)}</td>
+    ${CATEGORIES.map(c=>`<td><input class="sheet-number-input sheet-score-input" type="number" min="0" max="100" value="${scoreValue(e.scores,c.key)}" data-category-key="${c.key}"/></td>`).join("")}
+  </tr>`;
+}
 
-    const details = card.querySelector(".score-details");
-    details.innerHTML = CATEGORIES.map(category =>
-      `<div class="detail-line"><span>${escapeHtml(category.label)}</span><strong>${scoreValue(work.scores, category.key)}</strong></div>`
-    ).join("") + (work.memo
-      ? `<div class="detail-line" style="grid-column:1/-1"><span>メモ</span><strong>${escapeHtml(work.memo)}</strong></div>`
-      : "");
+function mobileCardHtml(work) {
+  const e=getLibraryEffectiveWork(work);
+  return `<article class="library-mobile-card" data-work-id="${escapeHtml(work.id)}">
+    <label><span>作品名</span><input class="sheet-title-input" type="text" value="${escapeHtml(e.title)}"/></label>
+    <div class="mobile-card-meta"><label><span>話数</span><input class="sheet-number-input sheet-episodes-input" type="number" min="0" max="9999" value="${Number(e.episodes||0)}"/></label><div><span>平均</span><strong class="mobile-average">${average(e.scores)}</strong></div></div>
+    <div class="sheet-genre-cell">${genreEditorHtml(e)}</div>
+    <div class="mobile-score-grid">${CATEGORIES.map(c=>`<label><span>${escapeHtml(c.label)}</span><input class="sheet-number-input sheet-score-input" type="number" min="0" max="100" value="${scoreValue(e.scores,c.key)}" data-category-key="${c.key}"/></label>`).join("")}</div>
+  </article>`;
+}
 
-    card.querySelector(".detail-btn").addEventListener("click", event => {
-      details.classList.toggle("hidden");
-      event.currentTarget.textContent = details.classList.contains("hidden") ? "詳細" : "閉じる";
-    });
-
-    card.querySelector(".edit-btn").addEventListener("click", () => {
-      editingId.value = work.id;
-      titleInput.value = work.title;
-      populateGenreOptions(work.genres ?? work.genre);
-      memoInput.value = work.memo;
-      episodesInput.value = String(work.episodes || 0);
-      clearAllCategoryApproximations();
-      setScores(work.scores);
-      captureFormScoreBaseline(work.scores);
-      renderCategoryRankingCards();
-      saveBtn.textContent = "変更を保存";
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    });
-
-    card.querySelector(".delete-btn").addEventListener("click", async () => {
-      if (!confirm(`「${work.title}」を削除しますか？`)) return;
-
-      setSyncStatus(IS_LOCAL ? "ローカルデータを削除しています…" : "Firestoreから削除しています…");
-      try {
-        if (IS_LOCAL) {
-          works = works.filter(item => item.id !== work.id);
-          selectedIds.delete(work.id);
-          refreshLocalWorks(`ローカル保存済み：${works.length}作品`);
-        } else {
-          await deleteDoc(reviewDocument(work.id));
-          selectedIds.delete(work.id);
-          setSyncStatus("削除しました。", "success");
-        }
-      } catch (error) {
-        console.error(error);
-        setSyncStatus(`削除に失敗しました：${friendlyError(error)}`, "error");
-        alert(`削除に失敗しました：${friendlyError(error)}`);
-      }
-    });
-
-    animeList.appendChild(card);
+function bindLibraryEditors(container) {
+  container.querySelectorAll("[data-work-id]").forEach(row=>{
+    const id=row.dataset.workId;
+    row.querySelector(".sheet-title-input")?.addEventListener("change",e=>updateLibraryDraft(id,d=>{d.title=e.target.value.trim();}));
+    row.querySelector(".sheet-episodes-input")?.addEventListener("change",e=>updateLibraryDraft(id,d=>{d.episodes=Math.max(0,Math.round(Number(e.target.value||0)));}));
+    row.querySelectorAll(".sheet-score-input").forEach(input=>input.addEventListener("change",()=>{const v=clampScore(input.value);input.value=v;updateLibraryDraft(id,d=>{d.scores[input.dataset.categoryKey]=v;});}));
+    row.querySelectorAll(".sheet-genre-editor input").forEach(input=>input.addEventListener("change",()=>updateLibraryDraft(id,d=>{d.genres=[...row.querySelectorAll(".sheet-genre-editor input:checked")].map(x=>x.value);}))); 
   });
+}
+
+function renderLibraryGenreFilter() {
+  const current=libraryGenreFilter.value;
+  const available=[...new Set(works.flatMap(w=>normalizeGenres(w.genres ?? w.genre)))].sort((a,b)=>a.localeCompare(b,"ja"));
+  libraryGenreFilter.innerHTML=`<option value="">すべてのジャンル</option>${available.map(g=>`<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join("")}`;
+  libraryGenreFilter.value=available.includes(current)?current:"";
+}
+
+function renderLibrary() {
+  renderLibraryHead(); renderLibraryGenreFilter();
+  const q=searchInput.value.trim().toLowerCase(), genre=libraryGenreFilter.value;
+  const filtered=works.filter(w=>{const e=getLibraryEffectiveWork(w);return `${e.title} ${genreText(e)}`.toLowerCase().includes(q) && (!genre || normalizeGenres(e.genres ?? e.genre).includes(genre));}).sort(compareLibraryWorks);
+  libraryEmpty.classList.toggle("hidden",filtered.length>0);
+  librarySpreadsheetWrap.classList.toggle("hidden",filtered.length===0);
+  libraryCards.classList.toggle("hidden",filtered.length===0);
+  librarySpreadsheetBody.innerHTML=filtered.map(spreadsheetRowHtml).join("");
+  libraryCards.innerHTML=filtered.map(mobileCardHtml).join("");
+  bindLibraryEditors(librarySpreadsheetBody); bindLibraryEditors(libraryCards); updateLibrarySaveBar();
 }
 
 function escapeHtml(value) {
@@ -1681,6 +1716,26 @@ function renderRankingList({
     .join("");
 }
 
+async function saveLibraryDrafts() {
+  if (!libraryDrafts.size || librarySaveInProgress) return;
+  librarySaveInProgress=true; updateLibrarySaveBar();
+  try {
+    const changed=works.filter(w=>libraryDrafts.has(w.id)), updatedAt=new Date().toISOString();
+    if (IS_LOCAL) {
+      changed.forEach(w=>{const d=libraryDrafts.get(w.id);Object.assign(w,{title:d.title,episodes:d.episodes,genres:[...d.genres],genre:d.genres.join("、"),scores:{...d.scores},updatedAt});});
+      libraryDrafts.clear(); refreshLocalWorks(`作品一覧から${changed.length}作品を保存しました。`);
+    } else {
+      const batch=writeBatch(db);
+      changed.forEach(w=>{const d=libraryDrafts.get(w.id);batch.set(reviewDocument(w.id),{title:d.title,episodes:d.episodes,genres:[...d.genres],genre:d.genres.join("、"),scores:{...d.scores},schemaVersion:SCHEMA_VERSION,updatedAt},{merge:true});});
+      await batch.commit();
+      changed.forEach(w=>{const d=libraryDrafts.get(w.id);Object.assign(w,{title:d.title,episodes:d.episodes,genres:[...d.genres],genre:d.genres.join("、"),scores:{...d.scores},updatedAt});});
+      libraryDrafts.clear(); renderAll(); setSyncStatus(`作品一覧から${changed.length}作品を保存しました。`,"success");
+    }
+  } catch(error) { console.error(error); alert(`保存に失敗しました：${friendlyError(error)}`); setSyncStatus(`保存に失敗しました：${friendlyError(error)}`,"error"); }
+  finally { librarySaveInProgress=false; updateLibrarySaveBar(); }
+}
+function discardLibraryDrafts() { libraryDrafts.clear(); renderLibrary(); }
+
 function renderRankings() {
   const sortedWorks = [...works].sort(compareByScoreThenTitle);
   overallRankingCount.textContent = `${sortedWorks.length}作品`;
@@ -1953,6 +2008,10 @@ async function initializeApplication() {
 }
 
 function bindUiEvents() {
+  searchInput?.addEventListener("input", renderLibrary);
+  libraryGenreFilter?.addEventListener("change", renderLibrary);
+  librarySaveBtn?.addEventListener("click", saveLibraryDrafts);
+  libraryDiscardBtn?.addEventListener("click", discardLibraryDrafts);
   comparisonSaveBtn?.addEventListener("click", saveComparisonDrafts);
   comparisonDiscardBtn?.addEventListener("click", discardComparisonDrafts);
 
@@ -2016,10 +2075,7 @@ function bindUiEvents() {
 
 
 
-  libraryToggle?.addEventListener("click", () => {
-    showAllLibrary = !showAllLibrary;
-    renderLibrary();
-  });
+
 }
 
 bindUiEvents();
