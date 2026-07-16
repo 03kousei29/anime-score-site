@@ -648,8 +648,13 @@ genreRankingSelect.addEventListener("change", () => {
 function average(scores) {
   const values = scoreValues(scores);
   return values.length
-    ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length)
+    ? values.reduce((sum, value) => sum + value, 0) / values.length
     : 0;
+}
+
+function formatAverage(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric.toFixed(1) : "0.0";
 }
 
 function strongestCategories(work) {
@@ -740,7 +745,7 @@ function syncLibraryWorkViews(workId, sourceElement = null) {
         episodesInput.value = effective.episodes || 0;
       }
       if (averageCell) {
-        averageCell.textContent = average(effective.scores);
+        averageCell.textContent = formatAverage(average(effective.scores));
       }
 
       container.querySelectorAll(".sheet-score-input").forEach(input => {
@@ -810,7 +815,7 @@ function spreadsheetRowHtml(work) {
     <td class="sticky-title"><input class="sheet-title-input" type="text" value="${escapeHtml(e.title)}" maxlength="80"/></td>
     <td><input class="sheet-number-input sheet-episodes-input" type="number" min="0" max="9999" value="${Number(e.episodes||0)}"/></td>
     <td class="sheet-genre-cell">${genreEditorHtml(e)}</td>
-    <td class="sheet-average-cell">${average(e.scores)}</td>
+    <td class="sheet-average-cell">${formatAverage(average(e.scores))}</td>
     ${CATEGORIES.map(c=>`<td><input class="sheet-number-input sheet-score-input" type="number" min="0" max="100" value="${scoreValue(e.scores,c.key)}" data-category-key="${c.key}"/></td>`).join("")}
   </tr>`;
 }
@@ -819,7 +824,7 @@ function mobileCardHtml(work) {
   const e=getLibraryEffectiveWork(work);
   return `<article class="library-mobile-card" data-work-id="${escapeHtml(work.id)}">
     <label><span>作品名</span><input class="sheet-title-input" type="text" value="${escapeHtml(e.title)}"/></label>
-    <div class="mobile-card-meta"><label><span>話数</span><input class="sheet-number-input sheet-episodes-input" type="number" min="0" max="9999" value="${Number(e.episodes||0)}"/></label><div><span>平均</span><strong class="mobile-average">${average(e.scores)}</strong></div></div>
+    <div class="mobile-card-meta"><label><span>話数</span><input class="sheet-number-input sheet-episodes-input" type="number" min="0" max="9999" value="${Number(e.episodes||0)}"/></label><div><span>平均</span><strong class="mobile-average">${formatAverage(average(e.scores))}</strong></div></div>
     <div class="sheet-genre-cell">${genreEditorHtml(e)}</div>
     <div class="mobile-score-grid">${CATEGORIES.map(c=>`<label><span>${escapeHtml(c.label)}</span><input class="sheet-number-input sheet-score-input" type="number" min="0" max="100" value="${scoreValue(e.scores,c.key)}" data-category-key="${c.key}"/></label>`).join("")}</div>
   </article>`;
@@ -1407,12 +1412,11 @@ function buildAiSummary() {
     .map(item => ({
       genre: item.genre,
       count: item.works.length,
-      average: Math.round(
+      average:
         item.works.reduce(
           (sum, work) => sum + average(work.scores),
           0
         ) / item.works.length
-      )
     }))
     .sort((a, b) => {
       if (b.count !== a.count) return b.count - a.count;
@@ -1457,7 +1461,7 @@ function buildAiSummary() {
     headline: `あなたの視聴傾向：${strongest?.label || "分析中"}重視`,
     paragraphs: [
       topWork
-        ? `現在の総合1位は「${topWork.title}」で、平均${average(topWork.scores)}点です。`
+        ? `現在の総合1位は「${topWork.title}」で、平均${formatAverage(average(topWork.scores))}点です。`
         : "",
       `${preferenceSentence}${strictSentence}`,
       `${genreSentence}${recommendation}`
@@ -1715,7 +1719,7 @@ function renderChart() {
         title="${hidden ? "チャートへ表示" : "チャートから一時的に非表示"}"
       >
         <span class="legend-swatch" style="background:${COLORS[index % COLORS.length]}"></span>
-        <span>${escapeHtml(work.title)}（平均 ${average(effectiveScores(work))}）</span>
+        <span>${escapeHtml(work.title)}（平均 ${formatAverage(average(effectiveScores(work)))}）</span>
       </button>
     `;
   }).join("");
@@ -1749,7 +1753,9 @@ function rankingItemHtml(work, index, scoreValue, scoreLabel, rankNumber = index
   const title = String(work?.title ?? "作品名未設定");
   const genres = normalizeGenres(work?.genres ?? work?.genre).join("・");
   const numericScore = Number(scoreValue);
-  const displayScore = Number.isFinite(numericScore) ? Math.round(numericScore) : "―";
+  const displayScore = Number.isFinite(numericScore)
+    ? (scoreLabel === "平均点" ? formatAverage(numericScore) : Math.round(numericScore))
+    : "―";
 
   return `
     <li class="ranking-item">
