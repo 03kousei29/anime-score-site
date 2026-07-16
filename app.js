@@ -1,8 +1,16 @@
-import { firebaseConfig } from "./firebase-config.js";
-
-const IS_LOCAL = ["localhost", "127.0.0.1", "::1"].includes(location.hostname);
+const LOCAL_HOSTS = new Set([
+  "localhost",
+  "127.0.0.1",
+  "0.0.0.0",
+  "::1",
+  "[::1]"
+]);
+const IS_LOCAL =
+  location.protocol === "file:" ||
+  LOCAL_HOSTS.has(location.hostname);
 const LOCAL_STORAGE_KEY = "anime-score-lab-v2-dev";
 
+let firebaseConfig = null;
 let initializeApp;
 let getAuth;
 let GoogleAuthProvider;
@@ -213,6 +221,15 @@ function refreshLocalWorks(message = `ローカル保存済み：${works.length}
   setSyncStatus(message, "local");
 }
 
+async function loadFirebaseConfig() {
+  const configModule = await import("./firebase-config.js");
+  firebaseConfig = configModule.firebaseConfig;
+
+  if (!firebaseConfig || typeof firebaseConfig !== "object") {
+    throw new Error("firebase-config.js からFirebase設定を読み込めませんでした。");
+  }
+}
+
 async function loadFirebaseModules() {
   const [appModule, authModule, firestoreModule] = await Promise.all([
     import("https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js"),
@@ -242,6 +259,10 @@ async function loadFirebaseModules() {
 }
 
 function isFirebaseConfigured() {
+  if (!firebaseConfig || typeof firebaseConfig !== "object") {
+    return false;
+  }
+
   const required = [
     firebaseConfig.apiKey,
     firebaseConfig.authDomain,
@@ -658,23 +679,86 @@ function getLibraryEffectiveWork(work) {
 
 function updateLibraryDraft(workId, updater) {
   const work = works.find(item => item.id === workId);
-  if (!work) return;
+  if (!work) return null;
+
+  const existingDraft = libraryDrafts.get(workId);
   const current = {
-    title: work.title,
-    episodes: work.episodes || 0,
-    genres: [...normalizeGenres(work.genres ?? work.genre)],
-    scores: { ...migrateLegacyScores(work.scores) },
-    ...(libraryDrafts.get(workId) || {})
+    title: existingDraft?.title ?? work.title,
+    episodes: existingDraft?.episodes ?? work.episodes ?? 0,
+    genres: [...(existingDraft?.genres ?? normalizeGenres(work.genres ?? work.genre))],
+    scores: {
+      ...migrateLegacyScores(work.scores),
+      ...(existingDraft?.scores || {})
+    }
   };
+
   updater(current);
+
+  current.title = String(current.title || "");
+  current.episodes = Math.max(0, Math.round(Number(current.episodes || 0)));
+  current.genres = normalizeGenres(current.genres);
+  current.scores = migrateLegacyScores(current.scores);
+
   const originalGenres = normalizeGenres(work.genres ?? work.genre);
   const originalScores = migrateLegacyScores(work.scores);
-  const changed = current.title !== work.title || Number(current.episodes) !== Number(work.episodes || 0) ||
+  const changed =
+    current.title !== work.title ||
+    current.episodes !== Number(work.episodes || 0) ||
     JSON.stringify(current.genres) !== JSON.stringify(originalGenres) ||
     CATEGORY_KEYS.some(key => current.scores[key] !== originalScores[key]);
-  if (changed) libraryDrafts.set(workId,current); else libraryDrafts.delete(workId);
+
+  if (changed) {
+    libraryDrafts.set(workId, current);
+  } else {
+    libraryDrafts.delete(workId);
+  }
+
   updateLibrarySaveBar();
-  renderLibrary();
+  return getLibraryEffectiveWork(work);
+}
+
+function syncLibraryWorkViews(workId, sourceElement = null) {
+  const work = works.find(item => item.id === workId);
+  if (!work) return;
+
+  const effective = getLibraryEffectiveWork(work);
+  const escapedId = typeof CSS !== "undefined" && CSS.escape
+    ? CSS.escape(workId)
+    : workId.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+
+  document
+    .querySelectorAll(`[data-work-id="${escapedId}"]`)
+    .forEach(container => {
+      const titleInput = container.querySelector(".sheet-title-input");
+      const episodesInput = container.querySelector(".sheet-episodes-input");
+      const averageCell = container.querySelector(".sheet-average-cell, .mobile-average");
+
+      if (titleInput && titleInput !== sourceElement) {
+        titleInput.value = effective.title;
+      }
+      if (episodesInput && episodesInput !== sourceElement) {
+        episodesInput.value = effective.episodes || 0;
+      }
+      if (averageCell) {
+        averageCell.textContent = average(effective.scores);
+      }
+
+      container.querySelectorAll(".sheet-score-input").forEach(input => {
+        if (input !== sourceElement) {
+          input.value = scoreValue(effective.scores, input.dataset.categoryKey);
+        }
+      });
+
+      const selectedGenres = new Set(normalizeGenres(effective.genres ?? effective.genre));
+      container.querySelectorAll(".sheet-genre-editor input").forEach(input => {
+        if (input !== sourceElement) {
+          input.checked = selectedGenres.has(input.value);
+        }
+      });
+
+      const summary = container.querySelector(".sheet-genre-editor summary");
+      if (summary) summary.textContent = genreText(effective);
+    });
 }
 
 function updateLibrarySaveBar() {
@@ -742,12 +826,47 @@ function mobileCardHtml(work) {
 }
 
 function bindLibraryEditors(container) {
-  container.querySelectorAll("[data-work-id]").forEach(row=>{
-    const id=row.dataset.workId;
-    row.querySelector(".sheet-title-input")?.addEventListener("change",e=>updateLibraryDraft(id,d=>{d.title=e.target.value.trim();}));
-    row.querySelector(".sheet-episodes-input")?.addEventListener("change",e=>updateLibraryDraft(id,d=>{d.episodes=Math.max(0,Math.round(Number(e.target.value||0)));}));
-    row.querySelectorAll(".sheet-score-input").forEach(input=>input.addEventListener("change",()=>{const v=clampScore(input.value);input.value=v;updateLibraryDraft(id,d=>{d.scores[input.dataset.categoryKey]=v;});}));
-    row.querySelectorAll(".sheet-genre-editor input").forEach(input=>input.addEventListener("change",()=>updateLibraryDraft(id,d=>{d.genres=[...row.querySelectorAll(".sheet-genre-editor input:checked")].map(x=>x.value);}))); 
+  container.querySelectorAll("[data-work-id]").forEach(row => {
+    const workId = row.dataset.workId;
+
+    row.querySelector(".sheet-title-input")?.addEventListener("input", event => {
+      updateLibraryDraft(workId, draft => {
+        draft.title = event.target.value;
+      });
+      syncLibraryWorkViews(workId, event.target);
+    });
+
+    row.querySelector(".sheet-episodes-input")?.addEventListener("input", event => {
+      const value = Math.max(0, Math.round(Number(event.target.value || 0)));
+      updateLibraryDraft(workId, draft => {
+        draft.episodes = value;
+      });
+      syncLibraryWorkViews(workId, event.target);
+    });
+
+    row.querySelectorAll(".sheet-score-input").forEach(input => {
+      input.addEventListener("input", () => {
+        const value = clampScore(input.value);
+        input.value = value;
+        updateLibraryDraft(workId, draft => {
+          draft.scores[input.dataset.categoryKey] = value;
+        });
+        syncLibraryWorkViews(workId, input);
+      });
+    });
+
+    row.querySelectorAll(".sheet-genre-editor input").forEach(input => {
+      input.addEventListener("change", () => {
+        const selectedGenres = [
+          ...row.querySelectorAll(".sheet-genre-editor input:checked")
+        ].map(item => item.value);
+
+        updateLibraryDraft(workId, draft => {
+          draft.genres = selectedGenres;
+        });
+        syncLibraryWorkViews(workId, input);
+      });
+    });
   });
 }
 
@@ -1962,14 +2081,16 @@ async function initializeApplication() {
 
   showLoginScreen();
 
-  if (!isFirebaseConfigured()) {
-    loginBtn.disabled = true;
-    configHelp.classList.remove("hidden");
-    setLoginStatus("firebase-config.jsを設定してください。", true);
-    return;
-  }
-
   try {
+    await loadFirebaseConfig();
+
+    if (!isFirebaseConfigured()) {
+      loginBtn.disabled = true;
+      configHelp.classList.remove("hidden");
+      setLoginStatus("firebase-config.jsを設定してください。", true);
+      return;
+    }
+
     await loadFirebaseModules();
     const app = initializeApp(firebaseConfig);
     auth = getAuth(app);
@@ -2003,7 +2124,10 @@ async function initializeApplication() {
     console.error(error);
     loginBtn.disabled = true;
     configHelp.classList.remove("hidden");
-    setLoginStatus(`Firebaseの初期化に失敗しました：${friendlyError(error)}`, true);
+    const message = error?.message?.includes("firebase-config.js")
+      ? "firebase-config.jsを読み込めません。GitHub上の配置を確認してください。"
+      : `Firebaseの初期化に失敗しました：${friendlyError(error)}`;
+    setLoginStatus(message, true);
   }
 }
 
