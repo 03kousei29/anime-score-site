@@ -1,48 +1,48 @@
-# Anime Score Lab Ver2.2（開発環境対応版）
+# Anime Score Lab Ver5
 
-同じHTML・CSS・JavaScriptを、ローカル開発とGitHub Pages本番の両方で利用できます。
+- 作品一覧をスプレッドシート型へ刷新
+- 作品名、話数、複数ジャンル、6観点を直接編集
+- 平均点を自動計算
+- 作品名、話数、平均点、各観点で昇順／降順
+- 検索・ジャンル絞り込み
+- 固定ヘッダー／固定作品名列
+- 変更作品だけ保存
+- スマホはカード表示
+- CSS/JS 5.0.0
 
-## 自動切替
 
-- `http://localhost:...` / `http://127.0.0.1:...`
-  - Googleログインなし
-  - Firebase SDKを読み込まない
-  - localStorageへ保存
-  - 「ローカル開発モード」を表示
-- GitHub Pagesなど上記以外
-  - Googleログイン
-  - Cloud Firestoreへ保存
-  - PC・スマートフォンで同期
+## Ver5.0.1 修正
+- セル変更時に作品一覧全体を再描画する処理を廃止
+- 編集中は変更行・平均点・未保存バーだけ更新
+- PC表とスマホカードの値を同期
+- 入力中のDOM破棄によるリロード・クラッシュを防止
 
-## ローカル起動（VS Code）
 
-1. このフォルダーをVS Codeで開く
-2. 拡張機能「Live Server」をインストール
-3. `index.html`を右クリック
-4. `Open with Live Server`
+## Ver5.0.2 localhost認証修正
 
-通常は `http://127.0.0.1:5500/` で開きます。
+- localhostでは `firebase-config.js` とFirebase SDKを読み込まない
+- Googleログインを完全にスキップ
+- localStorageだけで起動
+- GitHub PagesではFirebase AuthenticationとFirestoreを使用
+- localhost、127.0.0.1、0.0.0.0、IPv6 localhostへ対応
+- `app.js?v=5.0.2`、`style.css?v=5.0.2`
 
-## ローカル起動（Python）
 
-```bash
-python3 -m http.server 5500
-```
+## Ver5.1 平均点表示
 
-ブラウザで `http://localhost:5500/` を開きます。
+- 平均点を小数第1位まで表示
+- 内部計算では丸めず、6観点の実際の平均値を保持
+- 並び替えは小数を含む内部値で実施
+- 総合ランキング、ジャンル別ランキング、作品一覧、スマホ表示、レーダー凡例、AIサマリーへ反映
+- `app.js?v=5.1.0`、`style.css?v=5.1.0`
 
-`index.html`をダブルクリックする `file://` 起動は使用しないでください。
 
-## 本番反映
-
-ローカルで確認した以下のファイルを、そのままGitHubへ上書きします。
-
-- `index.html`
-- `style.css`
-- `app.js`
-
-`firebase-config.js`と`firestore.rules`は従来の本番設定を維持してください。
-
-## データについて
-
-ローカルデータとFirestoreデータは別です。ローカルで登録した作品は本番へ自動反映されません。必要な場合はJSON書き出し・読み込みで移行できます。
+## Ver5.2 レビュー編集・AI分析
+- 作品一覧のPC表・スマホカードからレビューを直接編集
+- レビューも既存の未保存変更／一括保存に統合
+- レビュー文を作品検索対象に追加
+- localStorage／Firestoreへreviewを保存
+- よく使う表現、レビュー話題別平均点を表示
+- 6評価項目と平均点のPearson相関係数を表示
+- レビュー内容と平均点の関連性を表示
+- app.js?v=5.2.0 / style.css?v=5.2.0

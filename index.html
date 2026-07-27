@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#151821" />
   <title>Anime Score Lab</title>
-  <link rel="stylesheet" href="style.css?v=5.1.0" />
+  <link rel="stylesheet" href="style.css?v=5.2.0" />
 </head>
 <body>
   <section id="loginScreen" class="login-screen">
@@ -251,7 +251,12 @@
         </section>
       </section>
 
-      <section class="panel ai-summary-panel full-width">
+            <section class="panel review-analysis-panel">
+        <div class="panel-heading"><div><p class="eyebrow">Review Intelligence</p><h2>レビューAI分析</h2></div></div>
+        <div id="reviewAnalysis" class="review-analysis"></div>
+      </section>
+
+<section class="panel ai-summary-panel full-width">
         <div class="section-title">
           <div>
             <p class="eyebrow">INSIGHT</p>
@@ -371,6 +376,6 @@
   </div>
 
 
-  <script type="module" src="app.js?v=5.1.0"></script>
+  <script type="module" src="app.js?v=5.2.0"></script>
 </body>
 </html>

@@ -384,6 +384,7 @@ function normalizeWork(item, fallbackId = crypto.randomUUID()) {
     genres: normalizeGenres(item?.genres ?? item?.genre),
     genre: normalizeGenres(item?.genres ?? item?.genre).join("、"),
     memo: String(item?.memo || "").trim(),
+    review: String(item?.review ?? item?.comment ?? ""),
     episodes: Math.max(0, Math.round(Number(item?.episodes || 0))),
     scores: migrateLegacyScores(item?.scores),
     schemaVersion: SCHEMA_VERSION,
@@ -691,6 +692,7 @@ function updateLibraryDraft(workId, updater) {
     title: existingDraft?.title ?? work.title,
     episodes: existingDraft?.episodes ?? work.episodes ?? 0,
     genres: [...(existingDraft?.genres ?? normalizeGenres(work.genres ?? work.genre))],
+    review: existingDraft?.review ?? work.review ?? "",
     scores: {
       ...migrateLegacyScores(work.scores),
       ...(existingDraft?.scores || {})
@@ -702,6 +704,7 @@ function updateLibraryDraft(workId, updater) {
   current.title = String(current.title || "");
   current.episodes = Math.max(0, Math.round(Number(current.episodes || 0)));
   current.genres = normalizeGenres(current.genres);
+  current.review = String(current.review || "");
   current.scores = migrateLegacyScores(current.scores);
 
   const originalGenres = normalizeGenres(work.genres ?? work.genre);
@@ -710,6 +713,7 @@ function updateLibraryDraft(workId, updater) {
     current.title !== work.title ||
     current.episodes !== Number(work.episodes || 0) ||
     JSON.stringify(current.genres) !== JSON.stringify(originalGenres) ||
+    current.review !== String(work.review || "") ||
     CATEGORY_KEYS.some(key => current.scores[key] !== originalScores[key]);
 
   if (changed) {
@@ -737,6 +741,7 @@ function syncLibraryWorkViews(workId, sourceElement = null) {
       const titleInput = container.querySelector(".sheet-title-input");
       const episodesInput = container.querySelector(".sheet-episodes-input");
       const averageCell = container.querySelector(".sheet-average-cell, .mobile-average");
+      const reviewInput = container.querySelector(".sheet-review-input, .mobile-review-input");
 
       if (titleInput && titleInput !== sourceElement) {
         titleInput.value = effective.title;
@@ -746,6 +751,10 @@ function syncLibraryWorkViews(workId, sourceElement = null) {
       }
       if (averageCell) {
         averageCell.textContent = formatAverage(average(effective.scores));
+      }
+      if (reviewInput && reviewInput !== sourceElement) {
+        reviewInput.value = effective.review || "";
+        autoResizeReview(reviewInput);
       }
 
       container.querySelectorAll(".sheet-score-input").forEach(input => {
@@ -793,6 +802,7 @@ function renderLibraryHead() {
     <th><button class="sheet-sort-button" data-sort-key="episodes" type="button">話数 ${sortIndicator("episodes")}</button></th>
     <th>ジャンル</th>
     <th><button class="sheet-sort-button" data-sort-key="average" type="button">平均 ${sortIndicator("average")}</button></th>
+    <th class="sheet-review-heading">レビュー</th>
     ${CATEGORIES.map(c=>`<th><button class="sheet-sort-button" data-sort-key="${c.key}" type="button">${escapeHtml(c.label)} ${sortIndicator(c.key)}</button></th>`).join("")}</tr>`;
   librarySpreadsheetHead.querySelectorAll(".sheet-sort-button").forEach(button=>button.addEventListener("click",()=>{
     const key=button.dataset.sortKey;
@@ -816,6 +826,7 @@ function spreadsheetRowHtml(work) {
     <td><input class="sheet-number-input sheet-episodes-input" type="number" min="0" max="9999" value="${Number(e.episodes||0)}"/></td>
     <td class="sheet-genre-cell">${genreEditorHtml(e)}</td>
     <td class="sheet-average-cell">${formatAverage(average(e.scores))}</td>
+    <td class="sheet-review-cell"><textarea class="sheet-review-input" rows="3" placeholder="レビューコメントを入力">${escapeHtml(e.review || "")}</textarea></td>
     ${CATEGORIES.map(c=>`<td><input class="sheet-number-input sheet-score-input" type="number" min="0" max="100" value="${scoreValue(e.scores,c.key)}" data-category-key="${c.key}"/></td>`).join("")}
   </tr>`;
 }
@@ -826,8 +837,15 @@ function mobileCardHtml(work) {
     <label><span>作品名</span><input class="sheet-title-input" type="text" value="${escapeHtml(e.title)}"/></label>
     <div class="mobile-card-meta"><label><span>話数</span><input class="sheet-number-input sheet-episodes-input" type="number" min="0" max="9999" value="${Number(e.episodes||0)}"/></label><div><span>平均</span><strong class="mobile-average">${formatAverage(average(e.scores))}</strong></div></div>
     <div class="sheet-genre-cell">${genreEditorHtml(e)}</div>
+    <label class="mobile-review-wrap"><span>レビュー</span><textarea class="mobile-review-input" rows="3" placeholder="レビューコメントを入力">${escapeHtml(e.review || "")}</textarea></label>
     <div class="mobile-score-grid">${CATEGORIES.map(c=>`<label><span>${escapeHtml(c.label)}</span><input class="sheet-number-input sheet-score-input" type="number" min="0" max="100" value="${scoreValue(e.scores,c.key)}" data-category-key="${c.key}"/></label>`).join("")}</div>
   </article>`;
+}
+
+function autoResizeReview(textarea) {
+  if (!textarea) return;
+  textarea.style.height = "auto";
+  textarea.style.height = `${Math.max(textarea.scrollHeight, 76)}px`;
 }
 
 function bindLibraryEditors(container) {
@@ -840,6 +858,16 @@ function bindLibraryEditors(container) {
       });
       syncLibraryWorkViews(workId, event.target);
     });
+
+    const reviewInput = row.querySelector(".sheet-review-input, .mobile-review-input");
+    if (reviewInput) {
+      autoResizeReview(reviewInput);
+      reviewInput.addEventListener("input", event => {
+        updateLibraryDraft(workId, draft => { draft.review = event.target.value; });
+        autoResizeReview(event.target);
+        syncLibraryWorkViews(workId, event.target);
+      });
+    }
 
     row.querySelector(".sheet-episodes-input")?.addEventListener("input", event => {
       const value = Math.max(0, Math.round(Number(event.target.value || 0)));
@@ -885,7 +913,7 @@ function renderLibraryGenreFilter() {
 function renderLibrary() {
   renderLibraryHead(); renderLibraryGenreFilter();
   const q=searchInput.value.trim().toLowerCase(), genre=libraryGenreFilter.value;
-  const filtered=works.filter(w=>{const e=getLibraryEffectiveWork(w);return `${e.title} ${genreText(e)}`.toLowerCase().includes(q) && (!genre || normalizeGenres(e.genres ?? e.genre).includes(genre));}).sort(compareLibraryWorks);
+  const filtered=works.filter(w=>{const e=getLibraryEffectiveWork(w);return `${e.title} ${genreText(e)} ${e.review || ""}`.toLowerCase().includes(q) && (!genre || normalizeGenres(e.genres ?? e.genre).includes(genre));}).sort(compareLibraryWorks);
   libraryEmpty.classList.toggle("hidden",filtered.length>0);
   librarySpreadsheetWrap.classList.toggle("hidden",filtered.length===0);
   libraryCards.classList.toggle("hidden",filtered.length===0);
@@ -1474,6 +1502,66 @@ function buildAiSummary() {
   };
 }
 
+
+const REVIEW_TOPIC_GROUPS = [
+  { name: "ストーリー・伏線", words: ["伏線", "展開", "物語", "脚本", "構成", "回収", "ストーリー", "結末", "ラスト"] },
+  { name: "キャラクター・関係性", words: ["キャラ", "キャラクター", "関係", "成長", "掛け合い", "主人公", "ヒロイン"] },
+  { name: "演出・作画・音響", words: ["演出", "作画", "映像", "戦闘", "アクション", "音楽", "bgm", "声優", "音響"] },
+  { name: "感情表現", words: ["感情", "表情", "心理", "繊細", "共感", "心情"] },
+  { name: "感動・催涙", words: ["泣け", "泣いた", "涙", "感動", "号泣", "切ない"] },
+  { name: "テーマ・教訓", words: ["教訓", "現実", "人生", "考えさせ", "共感", "テーマ", "メッセージ"] },
+  { name: "テンポ・見やすさ", words: ["テンポ", "見やす", "中だるみ", "冗長", "退屈", "一気見", "ループ"] }
+];
+
+function pearsonCorrelation(xs, ys) {
+  if (xs.length !== ys.length || xs.length < 3) return null;
+  const mx = xs.reduce((a,b)=>a+b,0)/xs.length, my = ys.reduce((a,b)=>a+b,0)/ys.length;
+  let n=0, dx2=0, dy2=0;
+  xs.forEach((x,i)=>{const dx=x-mx,dy=ys[i]-my;n+=dx*dy;dx2+=dx*dx;dy2+=dy*dy;});
+  const d=Math.sqrt(dx2*dy2); return d ? n/d : null;
+}
+function relationText(r) {
+  if (r === null || !Number.isFinite(r)) return "分析対象不足";
+  const a=Math.abs(r), s=a>=.7?"強い":a>=.4?"中程度の":a>=.2?"弱い":"ほぼない";
+  return `${s}${r>=0?"正":"負"}の関連`;
+}
+function reviewTokens(text) {
+  const value=String(text||"").toLowerCase();
+  const known=REVIEW_TOPIC_GROUPS.flatMap(g=>g.words).filter(w=>value.includes(w));
+  const spaced=value.replace(/[0-9０-９]/g," ").replace(/[^\\p{L}\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}ー]+/gu," ").split(/\\s+/).filter(t=>t.length>=2 && t.length<=14);
+  const stop=new Set(["これ","それ","こと","もの","作品","アニメ","とても","かなり","本当に","感じ","です","ます","だった","する","した"]);
+  return [...new Set([...known,...spaced].filter(t=>!stop.has(t)))];
+}
+function buildReviewAnalysis() {
+  const reviewed=works.filter(w=>String(w.review||"").trim());
+  if (reviewed.length<3) return {reviewed, message:"レビューを3作品以上入力すると、評価傾向と平均点の関連性を分析できます。"};
+  const avgs=reviewed.map(w=>average(w.scores));
+  const categoryRelations=CATEGORIES.map(c=>({label:c.label,r:pearsonCorrelation(reviewed.map(w=>scoreValue(w.scores,c.key)),avgs)})).sort((a,b)=>Math.abs(b.r||0)-Math.abs(a.r||0));
+  const topics=REVIEW_TOPIC_GROUPS.map(g=>{const matched=reviewed.filter(w=>g.words.some(word=>String(w.review).toLowerCase().includes(word))); const flags=reviewed.map(w=>g.words.some(word=>String(w.review).toLowerCase().includes(word))?1:0); return {name:g.name,count:matched.length,avg:matched.length?matched.reduce((s,w)=>s+average(w.scores),0)/matched.length:null,r:pearsonCorrelation(flags,avgs)};}).filter(x=>x.count);
+  const map=new Map(); reviewed.forEach(w=>reviewTokens(w.review).forEach(t=>{if(!map.has(t))map.set(t,[]);map.get(t).push(w);}));
+  const words=[...map].filter(([,ws])=>ws.length>=2).map(([word,ws])=>({word,count:ws.length,avg:ws.reduce((s,w)=>s+average(w.scores),0)/ws.length})).sort((a,b)=>b.count-a.count||b.avg-a.avg).slice(0,10);
+  return {reviewed,categoryRelations,topics,words};
+}
+function renderReviewAnalysis() {
+  const el=document.getElementById("reviewAnalysis"); if(!el)return;
+  const a=buildReviewAnalysis();
+  if(a.message){el.innerHTML=`<p class="analysis-empty">${escapeHtml(a.message)}</p>`;return;}
+  const strongest=a.categoryRelations[0];
+  const strongestTopic=[...a.topics].filter(x=>x.r!==null).sort((x,y)=>Math.abs(y.r)-Math.abs(x.r))[0];
+  el.innerHTML=`
+    <div class="review-analysis-lead">
+      <p><strong>分析対象：</strong>${a.reviewed.length}作品</p>
+      <p>平均点との関連が最も強い評価項目は「${escapeHtml(strongest.label)}」で、${escapeHtml(relationText(strongest.r))}${strongest.r===null?"":`（${strongest.r.toFixed(2)}）`}です。</p>
+      ${strongestTopic?`<p>レビューで「${escapeHtml(strongestTopic.name)}」に触れた作品は平均${formatAverage(strongestTopic.avg)}点で、平均点とは${escapeHtml(relationText(strongestTopic.r))}です。</p>`:""}
+    </div>
+    <div class="review-analysis-grid">
+      <section class="analysis-card"><h3>よく使う表現</h3><ul>${a.words.length?a.words.map(x=>`<li><span>${escapeHtml(x.word)}</span><strong>${x.count}作品／平均${formatAverage(x.avg)}</strong></li>`).join(""):'<li>共通表現が増えると表示されます。</li>'}</ul></section>
+      <section class="analysis-card"><h3>評価項目と平均点</h3><ul>${a.categoryRelations.map(x=>`<li><span>${escapeHtml(x.label)}</span><strong>${escapeHtml(relationText(x.r))}${x.r===null?"":`（${x.r.toFixed(2)}）`}</strong></li>`).join("")}</ul></section>
+      <section class="analysis-card analysis-card-wide"><h3>レビュー内容と平均点</h3><ul>${a.topics.map(x=>`<li><span>${escapeHtml(x.name)}（${x.count}作品）</span><strong>平均${formatAverage(x.avg)}／${escapeHtml(relationText(x.r))}${x.r===null?"":`（${x.r.toFixed(2)}）`}</strong></li>`).join("")}</ul></section>
+    </div>
+    <p class="analysis-note">レビュー内のキーワードと点数から算出した参考分析です。登録作品数や表現の偏りが少ない場合、結果は不安定になります。</p>`;
+}
+
 function renderAiSummary() {
   const summary = buildAiSummary();
 
@@ -1522,6 +1610,7 @@ function renderStatistics() {
   genreStatsFirst.innerHTML = renderGenreGroup(genreCounts.slice(0, 10));
   genreStatsSecond.innerHTML = renderGenreGroup(genreCounts.slice(10, 20));
   renderAiSummary();
+  renderReviewAnalysis();
 }
 
 function showRadarTooltip(event, category, selectedWorks) {
@@ -1847,13 +1936,13 @@ async function saveLibraryDrafts() {
   try {
     const changed=works.filter(w=>libraryDrafts.has(w.id)), updatedAt=new Date().toISOString();
     if (IS_LOCAL) {
-      changed.forEach(w=>{const d=libraryDrafts.get(w.id);Object.assign(w,{title:d.title,episodes:d.episodes,genres:[...d.genres],genre:d.genres.join("、"),scores:{...d.scores},updatedAt});});
+      changed.forEach(w=>{const d=libraryDrafts.get(w.id);Object.assign(w,{title:d.title,episodes:d.episodes,genres:[...d.genres],genre:d.genres.join("、"),scores:{...d.scores},review:d.review || "",updatedAt});});
       libraryDrafts.clear(); refreshLocalWorks(`作品一覧から${changed.length}作品を保存しました。`);
     } else {
       const batch=writeBatch(db);
-      changed.forEach(w=>{const d=libraryDrafts.get(w.id);batch.set(reviewDocument(w.id),{title:d.title,episodes:d.episodes,genres:[...d.genres],genre:d.genres.join("、"),scores:{...d.scores},schemaVersion:SCHEMA_VERSION,updatedAt},{merge:true});});
+      changed.forEach(w=>{const d=libraryDrafts.get(w.id);batch.set(reviewDocument(w.id),{title:d.title,episodes:d.episodes,genres:[...d.genres],genre:d.genres.join("、"),scores:{...d.scores},review:d.review || "",schemaVersion:SCHEMA_VERSION,updatedAt},{merge:true});});
       await batch.commit();
-      changed.forEach(w=>{const d=libraryDrafts.get(w.id);Object.assign(w,{title:d.title,episodes:d.episodes,genres:[...d.genres],genre:d.genres.join("、"),scores:{...d.scores},updatedAt});});
+      changed.forEach(w=>{const d=libraryDrafts.get(w.id);Object.assign(w,{title:d.title,episodes:d.episodes,genres:[...d.genres],genre:d.genres.join("、"),scores:{...d.scores},review:d.review || "",updatedAt});});
       libraryDrafts.clear(); renderAll(); setSyncStatus(`作品一覧から${changed.length}作品を保存しました。`,"success");
     }
   } catch(error) { console.error(error); alert(`保存に失敗しました：${friendlyError(error)}`); setSyncStatus(`保存に失敗しました：${friendlyError(error)}`,"error"); }
